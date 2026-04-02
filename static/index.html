@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gnet Messenger</title>
+    <style>
+        :root {
+            --primary-color: #0084ff;
+            --my-msg-bg: #0084ff;
+            --other-msg-bg: #e4e6eb;
+            --bg-color: #f0f2f5;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg-color); display: flex; height: 100vh; overflow: hidden; }
+        
+        #login-screen { position: fixed; inset: 0; background: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; }
+        .login-box { display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        #login-screen input { padding: 12px; border-radius: 8px; border: 1px solid #ddd; width: 280px; font-size: 1rem; outline: none; }
+        #login-screen button { padding: 12px 30px; background: var(--primary-color); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s; }
+        #login-screen button:disabled { background: #ccc; cursor: not-allowed; }
+
+        .sidebar { width: 300px; background: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+        .main-chat { flex: 1; display: flex; flex-direction: column; background: white; }
+
+        .search-area { padding: 15px; border-bottom: 1px solid #eee; }
+        .search-area input { width: 100%; padding: 10px; border-radius: 20px; border: 1px solid #ddd; outline: none; background: #f0f2f5; }
+        
+        .user-list { flex: 1; overflow-y: auto; }
+        .user-item { padding: 12px 15px; cursor: pointer; border-bottom: 1px solid #f9f9f9; transition: 0.2s; }
+        .user-item:hover { background: #f2f3f5; }
+        .user-item.active { background: #e7f3ff; color: var(--primary-color); font-weight: bold; }
+
+        .chat-header { padding: 15px 20px; background: white; border-bottom: 1px solid #ddd; font-weight: bold; font-size: 1.1rem; }
+        #messages { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+        
+        .msg-container { display: flex; flex-direction: column; max-width: 75%; }
+        .msg-container.sent { align-self: flex-end; align-items: flex-end; }
+        .msg-container.received { align-self: flex-start; align-items: flex-start; }
+
+        .msg-info { font-size: 0.75rem; color: #65676b; margin-bottom: 2px; }
+        .msg-bubble { padding: 10px 16px; border-radius: 18px; font-size: 0.95rem; line-height: 1.4; word-wrap: break-word; }
+        
+        .sent .msg-bubble { background: var(--my-msg-bg); color: white; border-bottom-right-radius: 4px; }
+        .received .msg-bubble { background: var(--other-msg-bg); color: #1c1e21; border-bottom-left-radius: 4px; }
+
+        .input-area { padding: 15px; display: flex; gap: 10px; border-top: 1px solid #ddd; }
+        .input-area input { flex: 1; padding: 12px 18px; border-radius: 22px; border: 1px solid #ddd; outline: none; background: #f0f2f5; }
+        .input-area button { background: var(--primary-color); color: white; border: none; border-radius: 20px; padding: 0 20px; cursor: pointer; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="login-screen">
+        <div class="login-box">
+            <h1 style="color: var(--primary-color)">Gnet Chat</h1>
+            <input type="text" id="username-input" placeholder="Введите ваш ник..." />
+            <button id="login-btn" onclick="login()">Начать общение</button>
+        </div>
+    </div>
+
+    <div class="sidebar">
+        <div class="search-area">
+            <input type="text" id="user-search" placeholder="Поиск людей..." oninput="searchUsers()" />
+        </div>
+        <div class="user-list" id="user-list">
+            <div class="user-item active" id="global-chat-item" onclick="selectChat('')">🌍 Общий чат</div>
+        </div>
+    </div>
+
+    <div class="main-chat">
+        <div class="chat-header" id="current-chat-title">🌍 Общий чат</div>
+        <div id="messages"></div>
+        <form class="input-area" id="chat-form">
+            <input type="text" id="message-input" placeholder="Напишите сообщение..." autocomplete="off" />
+            <button type="submit">Отправить</button>
+        </form>
+    </div>
+
+    <script>
+        let myUsername = "";
+        let currentRecipient = "";
+        let socket;
+        const chatHistory = { "": [] };
+
+        // Автофокус на поле ввода ника
+        document.getElementById("username-input").focus();
+
+        // Вход по нажатию Enter
+        document.getElementById("username-input").addEventListener("keypress", (e) => {
+            if (e.key === "Enter") login();
+        });
+
+        function login() {
+            const input = document.getElementById("username-input");
+            const btn = document.getElementById("login-btn");
+            
+            if (!input.value.trim()) return;
+            
+            myUsername = input.value.trim();
+            btn.disabled = true;
+            btn.innerText = "Подключение...";
+
+            const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
+            socket = new WebSocket(protocol + window.location.host + "/ws");
+            
+            socket.onopen = () => {
+                socket.send(JSON.stringify({ type: "auth", content: myUsername }));
+            };
+
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.type === "chat") {
+                        handleIncomingMessage(data);
+                    } else if (data.type === "search") {
+                        renderUserList(data.users);
+                    } else if (data.type === "status" && data.content === "authorized") {
+                        document.getElementById("login-screen").style.display = "none";
+                        searchUsers();
+                    }
+                } catch (e) {
+                    console.error("Ошибка парсинга:", e);
+                }
+            };
+
+            socket.onclose = () => {
+                btn.disabled = false;
+                btn.innerText = "Начать общение";
+                alert("Соединение потеряно. Попробуйте снова.");
+            };
+
+            socket.onerror = (err) => {
+                console.error("Ошибка WS:", err);
+                btn.disabled = false;
+                btn.innerText = "Начать общение";
+            };
+        }
+
+        function searchUsers() {
+            const query = document.getElementById("user-search").value;
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "search", content: query }));
+            }
+        }
+
+        function renderUserList(users) {
+            const list = document.getElementById("user-list");
+            list.innerHTML = `<div class="user-item ${currentRecipient === '' ? 'active' : ''}" onclick="selectChat('')">🌍 Общий чат</div>`;
+            
+            users.forEach(user => {
+                if (user === myUsername) return;
+                const div = document.createElement("div");
+                div.className = `user-item ${currentRecipient === user ? 'active' : ''}`;
+                div.innerText = "👤 " + user;
+                div.onclick = () => selectChat(user);
+                list.appendChild(div);
+            });
+        }
+
+        function selectChat(user) {
+            currentRecipient = user;
+            document.getElementById("current-chat-title").innerText = user ? "👤 " + user : "🌍 Общий чат";
+            
+            // Обновляем активный элемент в списке
+            document.querySelectorAll(".user-item").forEach(el => {
+                const isGlobal = user === "" && el.innerText.includes("Общий чат");
+                const isUser = el.innerText === "👤 " + user;
+                el.classList.toggle("active", isGlobal || isUser);
+            });
+
+            renderMessages();
+        }
+
+        function handleIncomingMessage(msg) {
+            let chatKey = "";
+            if (msg.to && msg.to !== "") {
+                chatKey = (msg.from === myUsername) ? msg.to : msg.from;
+            }
+
+            if (!chatHistory[chatKey]) chatHistory[chatKey] = [];
+            chatHistory[chatKey].push(msg);
+
+            if (currentRecipient === chatKey) {
+                renderMessages();
+            }
+        }
+
+        function renderMessages() {
+            const container = document.getElementById("messages");
+            container.innerHTML = "";
+            const history = chatHistory[currentRecipient] || [];
+            
+            history.forEach(msg => {
+                const isMe = msg.from === myUsername;
+                const wrapper = document.createElement("div");
+                wrapper.className = `msg-container ${isMe ? 'sent' : 'received'}`;
+                
+                const info = document.createElement("div");
+                info.className = "msg-info";
+                info.innerText = isMe ? "Вы" : (msg.from || "Аноним");
+                
+                const bubble = document.createElement("div");
+                bubble.className = "msg-bubble";
+                bubble.innerText = msg.content;
+                
+                wrapper.appendChild(info);
+                wrapper.appendChild(bubble);
+                container.appendChild(wrapper);
+            });
+            container.scrollTop = container.scrollHeight;
+        }
+
+        document.getElementById("chat-form").onsubmit = (e) => {
+            e.preventDefault();
+            const input = document.getElementById("message-input");
+            const val = input.value.trim();
+            if (!val || !socket || socket.readyState !== WebSocket.OPEN) return;
+
+            socket.send(JSON.stringify({
+                type: "chat",
+                to: currentRecipient,
+                content: val
+            }));
+            
+            input.value = "";
+            input.focus();
+        };
+    </script>
+</body>
+</html>
