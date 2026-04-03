@@ -1,21 +1,45 @@
 package main
 
 import (
-	"log"
+	"context"
+	"net/http"
 
-	"github.com/panjf2000/gnet/v2"
-	"github.com/gliedabrennung/messenger-core/internal/messenger"
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/adaptor"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
+	"github.com/hertz-contrib/websocket"
 )
 
-func main() {
-	hub := messenger.NewHub()
-	go hub.Run()
+var upgrader = websocket.HertzUpgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(ctx *app.RequestContext) bool {
+		return true
+	},
+}
 
-	server := messenger.NewWsServer(hub)
+var addr = ":8080"
 
-	log.Println("Server starting on :8081")
-	err := gnet.Run(server, "tcp://:8081", gnet.WithMulticore(true))
-	if err != nil {
-		log.Fatal(err)
+func serveHome(_ context.Context, c *app.RequestContext) {
+	if string(c.URI().Path()) != "/" {
+		hlog.Error("Not found", http.StatusNotFound)
+		return
 	}
+	if !c.IsGet() {
+		hlog.Error("Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	c.HTML(http.StatusOK, "home.html", nil)
+}
+
+func main() {
+	go hub.Run()
+	h := server.Default(server.WithHostPorts(addr))
+	h.LoadHTMLGlob("home.html")
+
+	h.GET("/", serveHome)
+	h.GET("/ws", adaptor.HertzHandler(http.HandlerFunc(serveWs)))
+
+	h.Spin()
 }
