@@ -1,4 +1,4 @@
-package web
+package http
 
 import (
 	"context"
@@ -15,10 +15,10 @@ func SetupRouter(h *server.Hertz) {
 	h.Use(api.CustomErrorHandler())
 
 	h.NoRoute(func(ctx context.Context, c *app.RequestContext) {
-		api.ErrorResponse(ctx, c, http.StatusNotFound, "NOT_FOUND", "Страница не найдена", nil)
+		api.ErrorResponse(ctx, c, http.StatusNotFound, "NOT_FOUND", "Page not found", nil)
 	})
 	h.NoMethod(func(ctx context.Context, c *app.RequestContext) {
-		api.ErrorResponse(ctx, c, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Метод не поддерживается", nil)
+		api.ErrorResponse(ctx, c, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", nil)
 	})
 
 	h.GET("/", ServeHome)

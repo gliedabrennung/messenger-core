@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/cloudwego/hertz/pkg/app/server"
-	"github.com/gliedabrennung/messenger-core/internal/controller/web"
+	"github.com/gliedabrennung/messenger-core/internal/controller/http"
 	"github.com/gliedabrennung/messenger-core/internal/messenger"
 )
 
@@ -14,7 +14,7 @@ func main() {
 	h := server.Default(server.WithHostPorts(addr))
 	h.LoadHTMLGlob("home.html")
 
-	web.SetupRouter(h)
+	http.SetupRouter(h)
 
 	h.Spin()
 }
