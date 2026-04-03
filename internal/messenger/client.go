@@ -1,12 +1,15 @@
-package main
+package messenger
 
 import (
 	"bytes"
-	"log"
+	"context"
 	"net/http"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
+	"github.com/gliedabrennung/messenger-core/internal/pkg/api"
+	"github.com/hertz-contrib/websocket"
 )
 
 const (
@@ -21,10 +24,10 @@ var (
 	space   = []byte{' '}
 )
 
-var upgrader = websocket.Upgrader{
+var upgrader = websocket.HertzUpgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
+	CheckOrigin: func(ctx *app.RequestContext) bool {
 		return true
 	},
 }
@@ -37,19 +40,22 @@ type Client struct {
 func (c *Client) readPump() {
 	defer func() {
 		hub.unregister <- c
-		c.conn.Close()
+		err := c.conn.Close()
+		if err != nil {
+			hlog.Errorf(err.Error())
+		}
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
-		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
+				hlog.Errorf("websocket read error: %v", err)
 			}
 			break
 		}
@@ -62,46 +68,56 @@ func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		err := c.conn.Close()
+		if err != nil {
+			hlog.Error(err.Error())
+		}
 	}()
 	for {
 		select {
 		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
 			w, err := c.conn.NextWriter(websocket.TextMessage)
 			if err != nil {
+				hlog.Errorf("websocket writer error: %v", err)
 				return
 			}
-			w.Write(message)
+			_, _ = w.Write(message)
 			n := len(c.send)
 			for i := 0; i < n; i++ {
-				w.Write(newline)
-				w.Write(<-c.send)
+				_, _ = w.Write(newline)
+				_, _ = w.Write(<-c.send)
 			}
 			if err := w.Close(); err != nil {
+				hlog.Errorf("websocket close writer error: %v", err)
 				return
 			}
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				hlog.Errorf("websocket ping error: %v", err)
 				return
 			}
 		}
 	}
 }
 
-func serveWs(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+func ServeWs(ctx context.Context, c *app.RequestContext) {
+	err := upgrader.Upgrade(c, func(conn *websocket.Conn) {
+		client := &Client{conn: conn, send: make(chan []byte, 256)}
+		hub.register <- client
+
+		go client.writePump()
+		client.readPump()
+	})
+
 	if err != nil {
-		log.Println(err)
+		hlog.CtxErrorf(ctx, "upgrade error: %v", err)
+		api.ErrorResponse(ctx, c, http.StatusInternalServerError, "WEBSOCKET_UPGRADE_FAILED", "Could not upgrade to websocket connection", err.Error())
 		return
 	}
-	client := &Client{conn: conn, send: make(chan []byte, 256)}
-	hub.register <- client
-	go client.writePump()
-	client.readPump()
 }

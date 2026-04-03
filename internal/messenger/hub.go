@@ -1,4 +1,4 @@
-package main
+package messenger
 
 import (
 	"sync"
@@ -15,9 +15,13 @@ type Hub struct {
 	unregister chan *Client
 }
 
-var hub = newHub()
+var hub = NewHub()
 
-func newHub() *Hub {
+func StartHub() {
+	hub.Run()
+}
+
+func NewHub() *Hub {
 	return &Hub{
 		broadcast:  make(chan []byte),
 		register:   make(chan *Client),
