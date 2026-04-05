@@ -13,7 +13,6 @@ import (
 
 func SetupRouter(h *server.Hertz) {
 	h.Use(api.CustomErrorHandler())
-
 	h.NoRoute(func(ctx context.Context, c *app.RequestContext) {
 		api.ErrorResponse(c, http.StatusNotFound,
 			"NOT_FOUND",

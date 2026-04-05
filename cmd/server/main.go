@@ -13,7 +13,7 @@ func main() {
 
 	h := server.Default(server.WithHostPorts(addr))
 	h.LoadHTMLGlob("home.html")
-
+	server.WithHandleMethodNotAllowed(true)
 	http.SetupRouter(h)
 
 	h.Spin()

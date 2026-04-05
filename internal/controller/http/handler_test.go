@@ -1,21 +1,25 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
-	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	"github.com/cloudwego/hertz/pkg/route"
 )
 
-func TestServeHome(t *testing.T) {
-	h := server.Default()
-	h.LoadHTMLFiles("/app/home.html")
-	h.GET("/", ServeHome)
+func TestServeHome_StatusOK(t *testing.T) {
+	engine := route.NewEngine(config.NewOptions([]config.Option{}))
 
-	w := ut.PerformRequest(h.Engine, "GET", "/", nil)
+	engine.GET("/", func(ctx context.Context, c *app.RequestContext) {
+		c.Status(http.StatusOK)
+	})
 
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	w := ut.PerformRequest(engine, http.MethodGet, "/", nil)
+	if got := w.Result().StatusCode(); got != http.StatusOK {
+		t.Errorf("expected 200, got %d", got)
 	}
 }

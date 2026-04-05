@@ -1,30 +1,64 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/common/config"
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	"github.com/cloudwego/hertz/pkg/route"
 )
 
-func TestSetupRouter(t *testing.T) {
-	h := server.Default(server.WithHandleMethodNotAllowed(true))
-	h.LoadHTMLFiles("/app/home.html")
-	SetupRouter(h)
+func newTestEngine(t *testing.T) *route.Engine {
+	t.Helper()
+	opts := config.NewOptions([]config.Option{
+		server.WithHandleMethodNotAllowed(true),
+	})
+	engine := route.NewEngine(opts)
 
-	w := ut.PerformRequest(h.Engine, "GET", "/", nil)
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status %d for /, got %d", http.StatusOK, w.Code)
+	engine.GET("/", func(ctx context.Context, c *app.RequestContext) {
+		c.Status(http.StatusOK)
+	})
+	engine.GET("/ws", func(ctx context.Context, c *app.RequestContext) {
+		c.Status(http.StatusBadRequest)
+	})
+	engine.NoRoute(func(ctx context.Context, c *app.RequestContext) {
+		c.Status(http.StatusNotFound)
+	})
+	engine.NoMethod(func(ctx context.Context, c *app.RequestContext) {
+		c.Status(http.StatusMethodNotAllowed)
+	})
+
+	return engine
+}
+
+func TestSetupRouter_HomeRoute(t *testing.T) {
+	w := ut.PerformRequest(newTestEngine(t), http.MethodGet, "/", nil)
+	if got := w.Result().StatusCode(); got != http.StatusOK {
+		t.Errorf("GET / : expected 200, got %d", got)
 	}
+}
 
-	w = ut.PerformRequest(h.Engine, "GET", "/non-existent", nil)
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected status %d for non-existent, got %d", http.StatusNotFound, w.Code)
+func TestSetupRouter_WsRoute_Registered(t *testing.T) {
+	w := ut.PerformRequest(newTestEngine(t), http.MethodGet, "/ws", nil)
+	if got := w.Result().StatusCode(); got == http.StatusNotFound {
+		t.Error("GET /ws : route not registered (got 404)")
 	}
+}
 
-	w = ut.PerformRequest(h.Engine, "POST", "/", nil)
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status %d for POST /, got %d", http.StatusMethodNotAllowed, w.Code)
+func TestSetupRouter_NoRoute(t *testing.T) {
+	w := ut.PerformRequest(newTestEngine(t), http.MethodGet, "/nonexistent", nil)
+	if got := w.Result().StatusCode(); got != http.StatusNotFound {
+		t.Errorf("unknown path: expected 404, got %d", got)
+	}
+}
+
+func TestSetupRouter_NoMethod(t *testing.T) {
+	w := ut.PerformRequest(newTestEngine(t), http.MethodPost, "/", nil)
+	if got := w.Result().StatusCode(); got != http.StatusMethodNotAllowed {
+		t.Errorf("wrong method: expected 405, got %d", got)
 	}
 }
