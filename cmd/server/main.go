@@ -1,21 +1,20 @@
 package main
 
 import (
-	"log"
-
-	"github.com/panjf2000/gnet/v2"
+	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/gliedabrennung/messenger-core/internal/controller/http"
 	"github.com/gliedabrennung/messenger-core/internal/messenger"
 )
 
+var addr = ":8080"
+
 func main() {
-	hub := messenger.NewHub()
-	go hub.Run()
+	go messenger.StartHub()
 
-	server := messenger.NewWsServer(hub)
+	h := server.Default(server.WithHostPorts(addr))
+	h.LoadHTMLGlob("static/index.html")
+	server.WithHandleMethodNotAllowed(true)
+	http.SetupRouter(h)
 
-	log.Println("Server starting on :8081")
-	err := gnet.Run(server, "tcp://:8081", gnet.WithMulticore(true))
-	if err != nil {
-		log.Fatal(err)
-	}
+	h.Spin()
 }
