@@ -796,7 +796,7 @@
                 const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
                 // В реальном приложении токен передается в URL или в первом сообщении
                 const host = window.location.hostname || "127.0.0.1";
-                socket = new WebSocket("ws://" + host + ":8081/ws");
+                socket = new WebSocket("ws://" + host + ":8080/ws");
 
                 socket.onopen = () => {
                     // Сейчас бэкенд ожидает type: "auth" и никнейм в content
