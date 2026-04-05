@@ -15,10 +15,16 @@ func SetupRouter(h *server.Hertz) {
 	h.Use(api.CustomErrorHandler())
 
 	h.NoRoute(func(ctx context.Context, c *app.RequestContext) {
-		api.ErrorResponse(ctx, c, http.StatusNotFound, "NOT_FOUND", "Page not found", nil)
+		api.ErrorResponse(c, http.StatusNotFound,
+			"NOT_FOUND",
+			"Page not found",
+			nil)
 	})
 	h.NoMethod(func(ctx context.Context, c *app.RequestContext) {
-		api.ErrorResponse(ctx, c, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", nil)
+		api.ErrorResponse(c, http.StatusMethodNotAllowed,
+			"METHOD_NOT_ALLOWED",
+			"Method not allowed",
+			nil)
 	})
 
 	h.GET("/", ServeHome)
