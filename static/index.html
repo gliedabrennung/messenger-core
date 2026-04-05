@@ -795,8 +795,8 @@
             function connectWebSocket(token) {
                 const protocol = window.location.protocol === "https:" ? "wss://" : "ws://";
                 // В реальном приложении токен передается в URL или в первом сообщении
-                // socket = new WebSocket(protocol + window.location.host + "/ws?token=" + token);
-                socket = new WebSocket(protocol + window.location.host + "/ws");
+                const host = window.location.hostname || "127.0.0.1";
+                socket = new WebSocket("ws://" + host + ":8081/ws");
 
                 socket.onopen = () => {
                     // Сейчас бэкенд ожидает type: "auth" и никнейм в content
@@ -863,17 +863,17 @@
             function createContactItem(id, name, isGlobal) {
                 const div = document.createElement('div');
                 const isActive = currentRecipient === id;
-                div.className = \`contact-item \${isActive ? 'active' : ''} \${isGlobal ? 'global' : ''}\`;
+                div.className = `contact-item ${isActive ? 'active' : ''} ${isGlobal ? 'global' : ''}`;
                 
                 const avatarStr = isGlobal ? '🌍' : name.charAt(0).toUpperCase();
                 
-                div.innerHTML = \`
-                    <div class="contact-avatar">\${avatarStr}</div>
+                div.innerHTML = `
+                    <div class="contact-avatar">${avatarStr}</div>
                     <div class="contact-info">
-                        <div class="contact-name">\${name}</div>
-                        <div class="contact-status">\${isGlobal ? 'Публичный чат' : 'В сети'}</div>
+                        <div class="contact-name">${name}</div>
+                        <div class="contact-status">${isGlobal ? 'Публичный чат' : 'В сети'}</div>
                     </div>
-                \`;
+                `;
                 
                 div.onclick = () => selectChat(id, name, isGlobal);
                 return div;
@@ -912,16 +912,16 @@
                 const history = chatHistory[currentRecipient] || [];
                 
                 if (history.length === 0) {
-                    messagesArea.innerHTML = \`<div style="text-align: center; color: var(--text-muted); margin-top: auto; padding: 20px;">
+                    messagesArea.innerHTML = `<div style="text-align: center; color: var(--text-muted); margin-top: auto; padding: 20px;">
                         Здесь пока нет сообщений. Отправьте первое!
-                    </div>\`;
+                    </div>`;
                     return;
                 }
 
                 history.forEach(msg => {
                     const isMe = msg.from === myUsername;
                     const wrapper = document.createElement("div");
-                    wrapper.className = \`message-wrapper \${isMe ? 'sent' : 'received'}\`;
+                    wrapper.className = `message-wrapper ${isMe ? 'sent' : 'received'}`;
                     
                     if (!isMe && currentRecipient === "") {
                         const sender = document.createElement("div");
