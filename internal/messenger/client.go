@@ -46,15 +46,19 @@ func (c *Client) readPump() {
 		}
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
-	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	err := c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	hlog.Errorf(err.Error())
 	c.conn.SetPongHandler(func(string) error {
-		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		err = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		hlog.Errorf(err.Error())
 		return nil
 	})
 	for {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+			if websocket.IsUnexpectedCloseError(err,
+				websocket.CloseGoingAway,
+				websocket.CloseAbnormalClosure) {
 				hlog.Errorf("websocket read error: %v", err)
 			}
 			break
@@ -76,9 +80,15 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.send:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			err := c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err != nil {
+				hlog.Error(err.Error())
+			}
 			if !ok {
-				_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				err = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				if err != nil {
+					hlog.Error(err.Error())
+				}
 				return
 			}
 			w, err := c.conn.NextWriter(websocket.TextMessage)
@@ -86,18 +96,30 @@ func (c *Client) writePump() {
 				hlog.Errorf("websocket writer error: %v", err)
 				return
 			}
-			_, _ = w.Write(message)
+			_, err = w.Write(message)
+			if err != nil {
+				hlog.Errorf("websocket write error: %v", err)
+			}
 			n := len(c.send)
 			for i := 0; i < n; i++ {
-				_, _ = w.Write(newline)
-				_, _ = w.Write(<-c.send)
+				_, err = w.Write(newline)
+				if err != nil {
+					hlog.Errorf("websocket write error: %v", err)
+				}
+				_, err = w.Write(<-c.send)
+				if err != nil {
+					hlog.Errorf("websocket write error: %v", err)
+				}
 			}
 			if err := w.Close(); err != nil {
 				hlog.Errorf("websocket close writer error: %v", err)
 				return
 			}
 		case <-ticker.C:
-			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			err := c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err != nil {
+				hlog.Error(err.Error())
+			}
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				hlog.Errorf("websocket ping error: %v", err)
 				return
@@ -117,7 +139,10 @@ func ServeWs(ctx context.Context, c *app.RequestContext) {
 
 	if err != nil {
 		hlog.CtxErrorf(ctx, "upgrade error: %v", err)
-		api.ErrorResponse(ctx, c, http.StatusInternalServerError, "WEBSOCKET_UPGRADE_FAILED", "Could not upgrade to websocket connection", err.Error())
+		api.ErrorResponse(c, http.StatusInternalServerError,
+			"WEBSOCKET_UPGRADE_FAILED",
+			"Could not upgrade to websocket connection",
+			err.Error())
 		return
 	}
 }

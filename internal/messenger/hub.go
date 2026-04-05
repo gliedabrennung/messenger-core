@@ -7,12 +7,9 @@ import (
 type Hub struct {
 	clients     map[*Client]struct{}
 	clientsLock sync.RWMutex
-
-	broadcast chan []byte
-
-	register chan *Client
-
-	unregister chan *Client
+	broadcast   chan []byte
+	register    chan *Client
+	unregister  chan *Client
 }
 
 var hub = NewHub()
