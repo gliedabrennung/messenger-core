@@ -17,7 +17,7 @@ WORKDIR /root/
 
 COPY --from=builder /app/messenger-server .
 
-COPY --from=builder /app/home.html .
+COPY --from=builder /app/static/index.html .
 
 EXPOSE 8080
 

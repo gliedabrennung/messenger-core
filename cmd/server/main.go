@@ -12,7 +12,7 @@ func main() {
 	go messenger.StartHub()
 
 	h := server.Default(server.WithHostPorts(addr))
-	h.LoadHTMLGlob("home.html")
+	h.LoadHTMLGlob("static/index.html")
 	server.WithHandleMethodNotAllowed(true)
 	http.SetupRouter(h)
 
