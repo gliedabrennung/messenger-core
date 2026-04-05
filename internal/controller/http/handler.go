@@ -8,5 +8,5 @@ import (
 )
 
 func ServeHome(_ context.Context, c *app.RequestContext) {
-	c.HTML(http.StatusOK, "home.html", nil)
+	c.HTML(http.StatusOK, "static/index.html", nil)
 }
