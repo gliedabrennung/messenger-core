@@ -42,7 +42,7 @@ func (c *Client) readPump() {
 		hub.unregister <- c
 		err := c.conn.Close()
 		if err != nil {
-			hlog.Errorf(err.Error())
+			hlog.Errorf("%v", err)
 		}
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
@@ -51,8 +51,10 @@ func (c *Client) readPump() {
 		hlog.Errorf("%v", err)
 	}
 	c.conn.SetPongHandler(func(string) error {
-		err = c.conn.SetReadDeadline(time.Now().Add(pongWait))
-		hlog.Errorf(err.Error())
+		err := c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		if err != nil {
+			hlog.Errorf("%v", err)
+		}
 		return nil
 	})
 	for {
@@ -76,7 +78,7 @@ func (c *Client) writePump() {
 		ticker.Stop()
 		err := c.conn.Close()
 		if err != nil {
-			hlog.Error(err.Error())
+			hlog.Errorf("%v", err)
 		}
 	}()
 	for {
@@ -84,12 +86,12 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			err := c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err != nil {
-				hlog.Error(err.Error())
+				hlog.Errorf("%v", err)
 			}
 			if !ok {
 				err = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				if err != nil {
-					hlog.Error(err.Error())
+					hlog.Errorf("%v", err)
 				}
 				return
 			}
@@ -120,7 +122,7 @@ func (c *Client) writePump() {
 		case <-ticker.C:
 			err := c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err != nil {
-				hlog.Error(err.Error())
+				hlog.Errorf("%v", err)
 			}
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				hlog.Errorf("websocket ping error: %v", err)
