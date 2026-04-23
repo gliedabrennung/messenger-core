@@ -47,7 +47,9 @@ func (c *Client) readPump() {
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
 	err := c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	hlog.Errorf(err.Error())
+	if err != nil {
+		hlog.Errorf("%v", err)
+	}
 	c.conn.SetPongHandler(func(string) error {
 		err = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 		hlog.Errorf(err.Error())
