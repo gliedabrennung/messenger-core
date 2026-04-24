@@ -71,3 +71,23 @@ func TestHub_Register_ReplacesOldConnection(t *testing.T) {
 		t.Fatal("old connection channel not closed")
 	}
 }
+
+func TestHub_DirectMessage_NonExistentClient(t *testing.T) {
+	h := NewHub()
+	go h.Run()
+
+	msg := DirectMessage{From: 1, To: 999, Message: "hello"}
+	h.direct <- msg
+	// Should not panic or block
+	time.Sleep(50 * time.Millisecond)
+}
+
+func TestHub_Unregister_NotFound(t *testing.T) {
+	h := NewHub()
+	go h.Run()
+
+	c := testClient(1)
+	h.unregister <- c
+	// Should not panic or block
+	time.Sleep(50 * time.Millisecond)
+}
