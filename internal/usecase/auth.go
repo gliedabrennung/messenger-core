@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gliedabrennung/messenger-core/internal/entity"
+	"github.com/gliedabrennung/messenger-core/internal/repository"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -36,9 +37,12 @@ func NewAuthUseCase(repo UserRepository, jwtSecret string, jwtTTL time.Duration)
 }
 
 func (a *AuthUseCase) Register(ctx context.Context, username, password string) (*entity.User, error) {
-	existing, _ := a.repo.GetByUsername(ctx, username)
-	if existing != nil {
+	existing, err := a.repo.GetByUsername(ctx, username)
+	if err == nil && existing != nil {
 		return nil, ErrUserAlreadyExists
+	}
+	if err != nil && !errors.Is(err, repository.ErrUserNotFound) {
+		return nil, err
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -52,6 +56,9 @@ func (a *AuthUseCase) Register(ctx context.Context, username, password string) (
 	}
 
 	if err := a.repo.Create(ctx, user); err != nil {
+		if errors.Is(err, repository.ErrUserAlreadyExists) {
+			return nil, ErrUserAlreadyExists
+		}
 		return nil, err
 	}
 
@@ -61,6 +68,10 @@ func (a *AuthUseCase) Register(ctx context.Context, username, password string) (
 func (a *AuthUseCase) Login(ctx context.Context, username, password string) (*entity.User, string, error) {
 	user, err := a.repo.GetByUsername(ctx, username)
 	if err != nil {
+		return nil, "", ErrInvalidCredentials
+	}
+
+	if user == nil {
 		return nil, "", ErrInvalidCredentials
 	}
 
