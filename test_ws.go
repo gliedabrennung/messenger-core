@@ -65,7 +65,6 @@ func main() {
 	}
 	defer c2.Close()
 
-	// Wait a bit for register channels to process
 	time.Sleep(100 * time.Millisecond)
 
 	msg := map[string]interface{}{
