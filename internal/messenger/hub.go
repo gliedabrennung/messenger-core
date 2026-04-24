@@ -1,15 +1,18 @@
 package messenger
 
-import (
-	"sync"
-)
+import "encoding/json"
 
 type Hub struct {
-	clients     map[*Client]struct{}
-	clientsLock sync.RWMutex
-	broadcast   chan []byte
-	register    chan *Client
-	unregister  chan *Client
+	clients    map[int64]*Client
+	register   chan *Client
+	unregister chan *Client
+	direct     chan DirectMessage
+}
+
+type DirectMessage struct {
+	From    int64  `json:"from"`
+	To      int64  `json:"to"`
+	Message string `json:"message"`
 }
 
 var hub = NewHub()
@@ -20,10 +23,10 @@ func StartHub() {
 
 func NewHub() *Hub {
 	return &Hub{
-		broadcast:  make(chan []byte),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
-		clients:    make(map[*Client]struct{}),
+		direct:     make(chan DirectMessage),
+		clients:    make(map[int64]*Client),
 	}
 }
 
@@ -31,41 +34,28 @@ func (h *Hub) Run() {
 	for {
 		select {
 		case client := <-h.register:
-			h.Register(client)
+			if oldClient, ok := h.clients[client.id]; ok {
+				close(oldClient.send)
+			}
+			h.clients[client.id] = client
 		case client := <-h.unregister:
-			h.Unregister(client)
-		case message := <-h.broadcast:
-			for client := range h.clients {
+			if c, ok := h.clients[client.id]; ok && c == client {
+				delete(h.clients, client.id)
+				close(client.send)
+			}
+		case msg := <-h.direct:
+			if client, ok := h.clients[msg.To]; ok {
+				msgBytes, err := json.Marshal(msg)
+				if err != nil {
+					continue
+				}
 				select {
-				case client.send <- message:
+				case client.send <- msgBytes:
 				default:
 					close(client.send)
-					delete(h.clients, client)
+					delete(h.clients, client.id)
 				}
 			}
 		}
-	}
-}
-
-func (h *Hub) Register(client *Client) {
-	h.AddClient(client)
-}
-
-func (h *Hub) AddClient(client *Client) {
-	h.clientsLock.Lock()
-	defer h.clientsLock.Unlock()
-	h.clients[client] = struct{}{}
-}
-
-func (h *Hub) Unregister(client *Client) {
-	h.DelClient(client)
-}
-
-func (h *Hub) DelClient(client *Client) {
-	h.clientsLock.Lock()
-	defer h.clientsLock.Unlock()
-	if _, ok := h.clients[client]; ok {
-		delete(h.clients, client)
-		close(client.send)
 	}
 }

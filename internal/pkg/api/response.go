@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
 )
 
 type Error struct {
@@ -33,6 +34,7 @@ func CustomErrorHandler() app.HandlerFunc {
 		if len(c.Errors) > 0 {
 			err := c.Errors.Last()
 			ErrorResponse(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", err.Error(), nil)
+			hlog.Errorf("unhandled error: %v", err)
 		}
 	}
 }
