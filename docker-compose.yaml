@@ -6,7 +6,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DSN=postgres://postgres:postgres@db:5432/messenger?sslmode=disable
+      - DSN=postgres://postgres:postgres@db:5432/users?sslmode=disable
       - JWT_SECRET=your-secure-jwt-secret-key-change-me
       - JWT_TTL=24h
     depends_on:
@@ -18,7 +18,7 @@ services:
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=messenger
+      - POSTGRES_DB=users
     ports:
       - "5432:5432"
     volumes:
