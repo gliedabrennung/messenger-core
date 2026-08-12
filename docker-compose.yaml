@@ -5,6 +5,13 @@ services:
       - "8080:8080"
     env_file:
       - .env
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:8080/health" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       db:
         condition: service_healthy
@@ -23,7 +30,6 @@ services:
       - "5440:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s

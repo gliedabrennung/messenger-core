@@ -42,7 +42,11 @@ func InitSchema(ctx context.Context, hosts []string, keyspace string) error {
 			content text,
 			created_at timestamp,
 			PRIMARY KEY ((chat_id), message_id)
-		) WITH CLUSTERING ORDER BY (message_id DESC)`, keyspace)
+		) WITH CLUSTERING ORDER BY (message_id DESC)
+			AND compaction = {'class': 'TimeWindowCompactionStrategy',
+			                  'compaction_window_unit': 'DAYS',
+			                  'compaction_window_size': 7}
+			AND gc_grace_seconds = 864000`, keyspace)
 	if err := session.Query(createTableQuery).WithContext(ctx).Exec(); err != nil {
 		logger.CtxErrorf(ctx, "failed to create direct_messages table in %s: %v", keyspace, err)
 		return fmt.Errorf("scylla schema init: create table: %w", err)
@@ -57,9 +61,20 @@ func NewScyllaStorage(session *gocql.Session, keyspace string) *ScyllaStorage {
 }
 
 func (s *ScyllaStorage) Save(ctx context.Context, msg *entity.Message) error {
-	id := gocql.TimeUUID()
-	msg.MessageID = id.String()
-	msg.CreatedAt = time.Now()
+	var id gocql.UUID
+	if msg.MessageID == "" {
+		id = gocql.TimeUUID()
+		msg.MessageID = id.String()
+	} else {
+		parsed, err := gocql.ParseUUID(msg.MessageID)
+		if err != nil {
+			return fmt.Errorf("scylla: invalid message id %q: %w", msg.MessageID, err)
+		}
+		id = parsed
+	}
+	if msg.CreatedAt.IsZero() {
+		msg.CreatedAt = time.Now().UTC()
+	}
 
 	query := fmt.Sprintf(`
 		INSERT INTO %s.direct_messages
@@ -74,7 +89,7 @@ func (s *ScyllaStorage) Save(ctx context.Context, msg *entity.Message) error {
 		return fmt.Errorf("scylla: save message: %w", err)
 	}
 
-	logger.CtxInfof(ctx, "scylla saved message %s for chat %s", msg.MessageID, msg.ChatID)
+	logger.CtxDebugf(ctx, "scylla saved message %s for chat %s", msg.MessageID, msg.ChatID)
 	return nil
 }
 
@@ -138,6 +153,6 @@ func (s *ScyllaStorage) GetHistory(ctx context.Context, chatID string, limit int
 		messages = messages[:limit]
 	}
 
-	logger.CtxInfof(ctx, "scylla retrieved %d messages for chat %s", len(messages), chatID)
+	logger.CtxDebugf(ctx, "scylla retrieved %d messages for chat %s", len(messages), chatID)
 	return messages, nextCursor, nil
 }

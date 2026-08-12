@@ -3,17 +3,18 @@ package logger
 import (
 	"context"
 	"io"
+	"sync/atomic"
 
 	"github.com/cloudwego/hertz/pkg/common/hlog"
+	"github.com/gliedabrennung/sedna/internal/common/reqid"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-var Log *zap.SugaredLogger
+var current atomic.Pointer[zap.SugaredLogger]
 
 type zapLogger struct {
-	sugared *zap.SugaredLogger
-	level   zap.AtomicLevel
+	level zap.AtomicLevel
 }
 
 func init() {
@@ -23,96 +24,65 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	Log = l.Sugar()
+	current.Store(l.Sugar())
 
-	hlog.SetLogger(&zapLogger{
-		sugared: l.Sugar(),
-		level:   cfg.Level,
-	})
+	hlog.SetLogger(&zapLogger{level: cfg.Level})
 }
 
-func (z *zapLogger) Trace(v ...interface{}) {
-	z.sugared.Debug(v...)
+func L() *zap.SugaredLogger {
+	return current.Load()
 }
 
-func (z *zapLogger) Debug(v ...interface{}) {
-	z.sugared.Debug(v...)
+func withCtx(ctx context.Context) *zap.SugaredLogger {
+	l := current.Load()
+	if id := reqid.FromContext(ctx); id != "" {
+		return l.With("request_id", id)
+	}
+	return l
 }
 
-func (z *zapLogger) Info(v ...interface{}) {
-	z.sugared.Info(v...)
+func (z *zapLogger) Trace(v ...any)  { current.Load().Debug(v...) }
+func (z *zapLogger) Debug(v ...any)  { current.Load().Debug(v...) }
+func (z *zapLogger) Info(v ...any)   { current.Load().Info(v...) }
+func (z *zapLogger) Notice(v ...any) { current.Load().Info(v...) }
+func (z *zapLogger) Warn(v ...any)   { current.Load().Warn(v...) }
+func (z *zapLogger) Error(v ...any)  { current.Load().Error(v...) }
+func (z *zapLogger) Fatal(v ...any)  { current.Load().Fatal(v...) }
+
+func (z *zapLogger) Tracef(format string, v ...any)  { current.Load().Debugf(format, v...) }
+func (z *zapLogger) Debugf(format string, v ...any)  { current.Load().Debugf(format, v...) }
+func (z *zapLogger) Infof(format string, v ...any)   { current.Load().Infof(format, v...) }
+func (z *zapLogger) Noticef(format string, v ...any) { current.Load().Infof(format, v...) }
+func (z *zapLogger) Warnf(format string, v ...any)   { current.Load().Warnf(format, v...) }
+func (z *zapLogger) Errorf(format string, v ...any)  { current.Load().Errorf(format, v...) }
+func (z *zapLogger) Fatalf(format string, v ...any)  { current.Load().Fatalf(format, v...) }
+
+func (z *zapLogger) CtxTracef(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Debugf(format, v...)
 }
 
-func (z *zapLogger) Notice(v ...interface{}) {
-	z.sugared.Info(v...)
+func (z *zapLogger) CtxDebugf(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Debugf(format, v...)
 }
 
-func (z *zapLogger) Warn(v ...interface{}) {
-	z.sugared.Warn(v...)
+func (z *zapLogger) CtxInfof(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Infof(format, v...)
 }
 
-func (z *zapLogger) Error(v ...interface{}) {
-	z.sugared.Error(v...)
+func (z *zapLogger) CtxNoticef(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Infof(format, v...)
 }
 
-func (z *zapLogger) Fatal(v ...interface{}) {
-	z.sugared.Fatal(v...)
+func (z *zapLogger) CtxWarnf(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Warnf(format, v...)
 }
 
-func (z *zapLogger) Tracef(format string, v ...interface{}) {
-	z.sugared.Debugf(format, v...)
+func (z *zapLogger) CtxErrorf(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Errorf(format, v...)
 }
 
-func (z *zapLogger) Debugf(format string, v ...interface{}) {
-	z.sugared.Debugf(format, v...)
-}
-
-func (z *zapLogger) Infof(format string, v ...interface{}) {
-	z.sugared.Infof(format, v...)
-}
-
-func (z *zapLogger) Noticef(format string, v ...interface{}) {
-	z.sugared.Infof(format, v...)
-}
-
-func (z *zapLogger) Warnf(format string, v ...interface{}) {
-	z.sugared.Warnf(format, v...)
-}
-
-func (z *zapLogger) Errorf(format string, v ...interface{}) {
-	z.sugared.Errorf(format, v...)
-}
-
-func (z *zapLogger) Fatalf(format string, v ...interface{}) {
-	z.sugared.Fatalf(format, v...)
-}
-
-func (z *zapLogger) CtxTracef(ctx context.Context, format string, v ...interface{}) {
-	z.sugared.Debugf(format, v...)
-}
-
-func (z *zapLogger) CtxDebugf(ctx context.Context, format string, v ...interface{}) {
-	z.sugared.Debugf(format, v...)
-}
-
-func (z *zapLogger) CtxInfof(ctx context.Context, format string, v ...interface{}) {
-	z.sugared.Infof(format, v...)
-}
-
-func (z *zapLogger) CtxNoticef(ctx context.Context, format string, v ...interface{}) {
-	z.sugared.Infof(format, v...)
-}
-
-func (z *zapLogger) CtxWarnf(ctx context.Context, format string, v ...interface{}) {
-	z.sugared.Warnf(format, v...)
-}
-
-func (z *zapLogger) CtxErrorf(ctx context.Context, format string, v ...interface{}) {
-	z.sugared.Errorf(format, v...)
-}
-
-func (z *zapLogger) CtxFatalf(ctx context.Context, format string, v ...interface{}) {
-	z.sugared.Fatalf(format, v...)
+func (z *zapLogger) CtxFatalf(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Fatalf(format, v...)
 }
 
 func (z *zapLogger) SetLevel(level hlog.Level) {
@@ -142,67 +112,37 @@ func (z *zapLogger) SetOutput(writer io.Writer) {
 		zapcore.AddSync(writer),
 		z.level,
 	)
-	l := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
-	z.sugared = l.Sugar()
-	Log = z.sugared
+	current.Store(zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1)).Sugar())
 }
 
-func Debug(v ...interface{}) {
-	Log.Debug(v...)
+func Debug(v ...any) { current.Load().Debug(v...) }
+func Info(v ...any)  { current.Load().Info(v...) }
+func Warn(v ...any)  { current.Load().Warn(v...) }
+func Error(v ...any) { current.Load().Error(v...) }
+func Fatal(v ...any) { current.Load().Fatal(v...) }
+
+func Debugf(format string, v ...any) { current.Load().Debugf(format, v...) }
+func Infof(format string, v ...any)  { current.Load().Infof(format, v...) }
+func Warnf(format string, v ...any)  { current.Load().Warnf(format, v...) }
+func Errorf(format string, v ...any) { current.Load().Errorf(format, v...) }
+func Fatalf(format string, v ...any) { current.Load().Fatalf(format, v...) }
+
+func CtxDebugf(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Debugf(format, v...)
 }
 
-func Info(v ...interface{}) {
-	Log.Info(v...)
+func CtxInfof(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Infof(format, v...)
 }
 
-func Warn(v ...interface{}) {
-	Log.Warn(v...)
+func CtxWarnf(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Warnf(format, v...)
 }
 
-func Error(v ...interface{}) {
-	Log.Error(v...)
+func CtxErrorf(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Errorf(format, v...)
 }
 
-func Fatal(v ...interface{}) {
-	Log.Fatal(v...)
-}
-
-func Debugf(format string, v ...interface{}) {
-	Log.Debugf(format, v...)
-}
-
-func Infof(format string, v ...interface{}) {
-	Log.Infof(format, v...)
-}
-
-func Warnf(format string, v ...interface{}) {
-	Log.Warnf(format, v...)
-}
-
-func Errorf(format string, v ...interface{}) {
-	Log.Errorf(format, v...)
-}
-
-func Fatalf(format string, v ...interface{}) {
-	Log.Fatalf(format, v...)
-}
-
-func CtxDebugf(ctx context.Context, format string, v ...interface{}) {
-	Log.Debugf(format, v...)
-}
-
-func CtxInfof(ctx context.Context, format string, v ...interface{}) {
-	Log.Infof(format, v...)
-}
-
-func CtxWarnf(ctx context.Context, format string, v ...interface{}) {
-	Log.Warnf(format, v...)
-}
-
-func CtxErrorf(ctx context.Context, format string, v ...interface{}) {
-	Log.Errorf(format, v...)
-}
-
-func CtxFatalf(ctx context.Context, format string, v ...interface{}) {
-	Log.Fatalf(format, v...)
+func CtxFatalf(ctx context.Context, format string, v ...any) {
+	withCtx(ctx).Fatalf(format, v...)
 }

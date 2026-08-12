@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '@/api';
-import { useChatStore } from '@/store/chatStore';
+import { useChatStore, MAX_MESSAGES_PER_CHAT } from '@/store/chatStore';
 import type { ChatHistoryResponse, Message } from '@/types';
 
 const EMPTY_MESSAGES: Message[] = [];
+const PAGE_SIZE = 50;
 
 export function useChatMessages(partnerId: number | undefined) {
   const setMessages = useChatStore((s) => s.setMessages);
+  const prependMessages = useChatStore((s) => s.prependMessages);
   const messages = useChatStore((s) => (partnerId ? s.messages[partnerId] || EMPTY_MESSAGES : EMPTY_MESSAGES));
   const [isLoading, setIsLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
@@ -21,22 +23,28 @@ export function useChatMessages(partnerId: number | undefined) {
 
       setIsLoading(true);
       try {
-        const url = `/messages?partner_id=${pid}&limit=50${cursor ? `&cursor=${cursor}` : ''}`;
+        const url = `/messages?partner_id=${pid}&limit=${PAGE_SIZE}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
         const res = await api.get<ChatHistoryResponse>(url, { signal: controller.signal });
         if (controller.signal.aborted) return;
 
         const fetched = (res.data.messages || []).reverse();
-        const prev = cursor ? useChatStore.getState().messages[pid] || [] : [];
-        setMessages(pid, cursor ? [...fetched, ...prev] : fetched);
+        if (cursor) {
+          prependMessages(pid, fetched);
+        } else {
+          setMessages(pid, fetched);
+        }
+
         cursorRef.current = res.data.next_cursor;
-        setHasMore(!!res.data.next_cursor);
+
+        const loaded = (useChatStore.getState().messages[pid] || []).length;
+        setHasMore(!!res.data.next_cursor && loaded < MAX_MESSAGES_PER_CHAT);
       } catch (err: any) {
         if (err.name !== 'CanceledError') console.error(err);
       } finally {
         if (!controller.signal.aborted) setIsLoading(false);
       }
     },
-    [setMessages]
+    [setMessages, prependMessages]
   );
 
   useEffect(() => {

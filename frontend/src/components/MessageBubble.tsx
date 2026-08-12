@@ -35,17 +35,22 @@ const MessageBubbleBase: FC<MessageBubbleProps> = ({ message, isMe }) => {
           isMe
             ? 'gradient-accent text-white rounded-br-sm'
             : 'bg-[var(--color-surface-secondary)] text-[var(--color-text-primary)] rounded-bl-sm border border-[var(--color-border-subtle)]',
-          message.isPending && 'opacity-60'
+          message.isPending && 'opacity-60',
+          message.failed && 'opacity-70 ring-1 ring-[var(--color-danger)]'
         )}
       >
         <p className="text-sm break-words whitespace-pre-wrap leading-relaxed">{content}</p>
         <div
           className={clsx(
             'text-[10px] mt-1 text-right select-none',
-            isMe ? 'text-indigo-200/70' : 'text-[var(--color-text-muted)]'
+            message.failed
+              ? 'text-[var(--color-danger)]'
+              : isMe
+                ? 'text-indigo-200/70'
+                : 'text-[var(--color-text-muted)]'
           )}
         >
-          {message.isPending ? 'Sending...' : formattedTime}
+          {message.failed ? 'Not delivered' : message.isPending ? 'Sending...' : formattedTime}
         </div>
       </div>
     </div>

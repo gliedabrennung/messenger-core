@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"strconv"
+	"strings"
 
 	"github.com/gliedabrennung/sedna/internal/apperr"
 	"github.com/gliedabrennung/sedna/internal/entity"
@@ -45,7 +46,7 @@ func (repo *Repository) GetByUsername(ctx context.Context, username string) (*en
 	query := `
 		SELECT id, username, password, created_at, updated_at
 		FROM users
-		WHERE username = $1`
+		WHERE lower(username) = lower($1)`
 	user := &entity.User{}
 	err := repo.db.QueryRow(ctx, query, username).
 		Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt, &user.UpdatedAt)
@@ -58,19 +59,27 @@ func (repo *Repository) GetByUsername(ctx context.Context, username string) (*en
 	return user, nil
 }
 
+func escapeLikePattern(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(s)
+}
+
 func (repo *Repository) Search(ctx context.Context, query string) ([]entity.User, error) {
 	var users []entity.User
 
+	pattern := "%" + escapeLikePattern(query) + "%"
 	id, err := strconv.ParseInt(query, 10, 64)
 	var q string
-	var args []interface{}
+	var args []any
 
 	if err == nil {
-		q = `SELECT id, username, created_at, updated_at FROM users WHERE id = $1 OR username ILIKE $2 LIMIT 20`
-		args = []interface{}{id, "%" + query + "%"}
+		q = `SELECT id, username, created_at, updated_at FROM users
+		     WHERE id = $1 OR username ILIKE $2 LIMIT 20`
+		args = []any{id, pattern}
 	} else {
-		q = `SELECT id, username, created_at, updated_at FROM users WHERE username ILIKE $1 LIMIT 20`
-		args = []interface{}{"%" + query + "%"}
+		q = `SELECT id, username, created_at, updated_at FROM users
+		     WHERE username ILIKE $1 LIMIT 20`
+		args = []any{pattern}
 	}
 
 	rows, err := repo.db.Query(ctx, q, args...)
@@ -87,6 +96,16 @@ func (repo *Repository) Search(ctx context.Context, query string) ([]entity.User
 		users = append(users, u)
 	}
 	return users, rows.Err()
+}
+
+func (repo *Repository) Exists(ctx context.Context, userID int64) (bool, error) {
+	var exists bool
+	err := repo.db.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, userID).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("postgres: user exists: %w", err)
+	}
+	return exists, nil
 }
 
 func (repo *Repository) GetByIDs(ctx context.Context, ids []int64) ([]entity.User, error) {

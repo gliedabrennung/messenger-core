@@ -17,7 +17,14 @@ import (
 type mockMessageRepo struct {
 	getChatHistory func(ctx context.Context, chatID string, limit int, cursor string) ([]*entity.Message, string, error)
 	save           func(ctx context.Context, msg *entity.Message) error
-	subscribe      func(ctx context.Context, chatID string) (<-chan *entity.Message, func() error, error)
+	newMessageID   func() string
+}
+
+func (m *mockMessageRepo) NewMessageID() string {
+	if m.newMessageID != nil {
+		return m.newMessageID()
+	}
+	return "mock-id"
 }
 
 func (m *mockMessageRepo) Save(ctx context.Context, msg *entity.Message) error {
@@ -32,13 +39,6 @@ func (m *mockMessageRepo) GetChatHistory(ctx context.Context, chatID string, lim
 		return m.getChatHistory(ctx, chatID, limit, cursor)
 	}
 	return nil, "", nil
-}
-
-func (m *mockMessageRepo) Subscribe(ctx context.Context, chatID string) (<-chan *entity.Message, func() error, error) {
-	if m.subscribe != nil {
-		return m.subscribe(ctx, chatID)
-	}
-	return nil, nil, nil
 }
 
 func TestMessageHandler_GetHistory(t *testing.T) {
@@ -83,7 +83,7 @@ func TestMessageHandler_GetHistory(t *testing.T) {
 			t.Errorf("expected 400, got %d", w.Code)
 		}
 	})
-	
+
 	t.Run("InvalidPartnerID", func(t *testing.T) {
 		w := ut.PerformRequest(engine, http.MethodGet, "/history_auth?partner_id=invalid", nil)
 		if w.Code != http.StatusBadRequest {

@@ -3,45 +3,98 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/gliedabrennung/sedna/internal/common/logger"
 	"github.com/gliedabrennung/sedna/internal/domain"
+	"github.com/gliedabrennung/sedna/internal/entity"
 )
 
-const shardCount = 32
+const (
+	shardCount = 32
+
+	persistWorkers   = 16
+	persistQueueSize = 4096
+	persistTimeout   = 5 * time.Second
+
+	persistEnqueueWait = 2 * time.Second
+)
+
+var localIDSeq uint64
+
+type Delivery struct {
+	UserID int64
+	Data   []byte
+}
+
+type Fanout interface {
+	Publish(ctx context.Context, userID int64, data []byte) error
+	Subscribe(userID int64) error
+	Unsubscribe(userID int64) error
+	Delivery() <-chan Delivery
+}
+
+type RecipientValidator interface {
+	Exists(ctx context.Context, userID int64) (bool, error)
+}
+
+type persistJob struct {
+	msg      *entity.Message
+	clientID string
+}
 
 type Hub struct {
-	shards  [shardCount]*shard
-	done    chan struct{}
-	msgRepo domain.MessageRepository
+	shards    [shardCount]*shard
+	done      chan struct{}
+	msgRepo   domain.MessageRepository
+	fanout    Fanout
+	recipient RecipientValidator
+
+	persist   chan persistJob
+	stopOnce  sync.Once
+	baseCtx   context.Context
+	baseReady chan struct{}
 }
 
 type shard struct {
 	clients    map[int64]*Client
 	register   chan *Client
 	unregister chan *Client
-	direct     chan DirectMessage
+	out        chan Delivery
 	done       chan struct{}
 }
 
 type DirectMessage struct {
-	From    int64  `json:"from"`
-	To      int64  `json:"to"`
-	Message string `json:"message"`
+	Type      string    `json:"type"`
+	MessageID string    `json:"message_id"`
+	From      int64     `json:"from"`
+	To        int64     `json:"to"`
+	Message   string    `json:"message"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func NewHub(msgRepo domain.MessageRepository) *Hub {
+	return NewHubWithFanout(msgRepo, nil)
+}
+
+func NewHubWithFanout(msgRepo domain.MessageRepository, f Fanout) *Hub {
 	h := &Hub{
-		done:    make(chan struct{}),
-		msgRepo: msgRepo,
+		done:      make(chan struct{}),
+		msgRepo:   msgRepo,
+		fanout:    f,
+		persist:   make(chan persistJob, persistQueueSize),
+		baseCtx:   context.Background(),
+		baseReady: make(chan struct{}),
 	}
 	for i := range h.shards {
 		h.shards[i] = &shard{
 			clients:    make(map[int64]*Client),
 			register:   make(chan *Client),
 			unregister: make(chan *Client),
-			direct:     make(chan DirectMessage, 256),
+			out:        make(chan Delivery, 256),
 			done:       h.done,
 		}
 	}
@@ -60,6 +113,11 @@ func (h *Hub) Register(c *Client) {
 	s := h.getShard(c.id)
 	select {
 	case s.register <- c:
+		if h.fanout != nil {
+			if err := h.fanout.Subscribe(c.id); err != nil {
+				logger.Errorf("hub: fanout subscribe user %d: %v", c.id, err)
+			}
+		}
 	case <-h.done:
 	}
 }
@@ -68,18 +126,101 @@ func (h *Hub) Unregister(c *Client) {
 	s := h.getShard(c.id)
 	select {
 	case s.unregister <- c:
+		if h.fanout != nil {
+			if err := h.fanout.Unsubscribe(c.id); err != nil {
+				logger.Errorf("hub: fanout unsubscribe user %d: %v", c.id, err)
+			}
+		}
 	case <-h.done:
 	}
 }
 
 func (h *Hub) Send(msg DirectMessage) bool {
-	s := h.getShard(msg.To)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		logger.Errorf("hub: marshal direct message: %v", err)
+		return true
+	}
+
+	if h.fanout != nil {
+		ctx, cancel := context.WithTimeout(h.context(), writeWait)
+		err := h.fanout.Publish(ctx, msg.To, data)
+		cancel()
+		if err == nil {
+			return true
+		}
+
+		logger.Errorf("hub: fanout publish to user %d: %v", msg.To, err)
+	}
+
+	return h.deliverLocal(Delivery{UserID: msg.To, Data: data})
+}
+
+func (h *Hub) deliverLocal(d Delivery) bool {
+	s := h.getShard(d.UserID)
 	select {
-	case s.direct <- msg:
+	case s.out <- d:
 		return true
 	case <-h.done:
 		return false
 	}
+}
+
+func (h *Hub) SetRecipientValidator(v RecipientValidator) {
+	h.recipient = v
+}
+
+func (h *Hub) RecipientExists(ctx context.Context, userID int64) bool {
+	if h.recipient == nil {
+		return true
+	}
+	ok, err := h.recipient.Exists(ctx, userID)
+	if err != nil {
+		logger.Errorf("hub: recipient lookup for user %d: %v", userID, err)
+		return true
+	}
+	return ok
+}
+
+func (h *Hub) Persist(msg *entity.Message, clientID string) {
+	if h.msgRepo == nil {
+		return
+	}
+	job := persistJob{msg: msg, clientID: clientID}
+
+	select {
+	case h.persist <- job:
+		return
+	default:
+	}
+
+	timer := time.NewTimer(persistEnqueueWait)
+	defer timer.Stop()
+	select {
+	case h.persist <- job:
+	case <-h.done:
+	case <-timer.C:
+		logger.Errorf("hub: persist queue full, dropped message %s for chat %s",
+			msg.MessageID, msg.ChatID)
+		h.NotifySender(msg.FromID, storeFailure(msg, clientID))
+	}
+}
+
+func storeFailure(msg *entity.Message, clientID string) ErrorEvent {
+	ev := NewErrorEvent(CodeMessageNotStored,
+		"message was delivered but could not be stored", clientID)
+	ev.MessageID = msg.MessageID
+	ev.To = msg.ToID
+	return ev
+}
+
+func (h *Hub) NotifySender(userID int64, event any) {
+	data, err := json.Marshal(event)
+	if err != nil {
+		logger.Errorf("hub: marshal event for user %d: %v", userID, err)
+		return
+	}
+	h.deliverLocal(Delivery{UserID: userID, Data: data})
 }
 
 func (h *Hub) Done() <-chan struct{} {
@@ -87,14 +228,35 @@ func (h *Hub) Done() <-chan struct{} {
 }
 
 func (h *Hub) Stop() {
-	close(h.done)
+	h.stopOnce.Do(func() { close(h.done) })
 }
 
 func (h *Hub) MsgRepo() domain.MessageRepository {
 	return h.msgRepo
 }
 
+func (h *Hub) NewMessageID() string {
+	if h.msgRepo != nil {
+		return h.msgRepo.NewMessageID()
+	}
+
+	return "local-" + strconv.FormatUint(atomic.AddUint64(&localIDSeq, 1), 36) +
+		"-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+func (h *Hub) context() context.Context {
+	select {
+	case <-h.baseReady:
+		return h.baseCtx
+	default:
+		return context.Background()
+	}
+}
+
 func (h *Hub) Run(ctx context.Context) {
+	h.baseCtx = ctx
+	close(h.baseReady)
+
 	var wg sync.WaitGroup
 	for _, s := range h.shards {
 		wg.Add(1)
@@ -103,8 +265,62 @@ func (h *Hub) Run(ctx context.Context) {
 			s.run(ctx)
 		}(s)
 	}
+
+	for i := 0; i < persistWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h.runPersist(ctx)
+		}()
+	}
+
+	if h.fanout != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h.runFanout(ctx)
+		}()
+	}
+
 	wg.Wait()
 	logger.Info("hub: shutdown complete")
+}
+
+func (h *Hub) runPersist(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.done:
+			return
+		case job := <-h.persist:
+			saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), persistTimeout)
+			err := h.msgRepo.Save(saveCtx, job.msg)
+			cancel()
+			if err != nil {
+				logger.Errorf("hub: save message %s for chat %s: %v",
+					job.msg.MessageID, job.msg.ChatID, err)
+				h.NotifySender(job.msg.FromID, storeFailure(job.msg, job.clientID))
+			}
+		}
+	}
+}
+
+func (h *Hub) runFanout(ctx context.Context) {
+	in := h.fanout.Delivery()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-h.done:
+			return
+		case d, ok := <-in:
+			if !ok {
+				return
+			}
+			h.deliverLocal(d)
+		}
+	}
 }
 
 func (s *shard) run(ctx context.Context) {
@@ -126,19 +342,17 @@ func (s *shard) run(ctx context.Context) {
 				delete(s.clients, client.id)
 				close(client.send)
 			}
-		case msg := <-s.direct:
-			if client, ok := s.clients[msg.To]; ok {
-				msgBytes, err := json.Marshal(msg)
-				if err != nil {
-					logger.Errorf("hub: marshal direct message: %v", err)
-					continue
-				}
-				select {
-				case client.send <- msgBytes:
-				default:
-					close(client.send)
-					delete(s.clients, client.id)
-				}
+		case d := <-s.out:
+			client, ok := s.clients[d.UserID]
+			if !ok {
+				continue
+			}
+			select {
+			case client.send <- d.Data:
+			default:
+
+				close(client.send)
+				delete(s.clients, client.id)
 			}
 		}
 	}
