@@ -10,7 +10,10 @@ export interface Message {
   to_id: number;
   content: string;
   created_at?: string;
+
+  client_id?: string;
   isPending?: boolean;
+  failed?: boolean;
 }
 
 export interface ChatHistoryResponse {

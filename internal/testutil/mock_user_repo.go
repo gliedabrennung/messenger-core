@@ -10,6 +10,8 @@ import (
 
 type MockUserRepo struct {
 	Users map[string]*entity.User
+
+	ExistsErr error
 }
 
 func NewMockUserRepo() *MockUserRepo {
@@ -41,6 +43,18 @@ func (m *MockUserRepo) Search(_ context.Context, query string) ([]entity.User, e
 		}
 	}
 	return result, nil
+}
+
+func (m *MockUserRepo) Exists(_ context.Context, userID int64) (bool, error) {
+	if m.ExistsErr != nil {
+		return false, m.ExistsErr
+	}
+	for _, u := range m.Users {
+		if u.ID == userID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *MockUserRepo) GetByIDs(_ context.Context, ids []int64) ([]entity.User, error) {

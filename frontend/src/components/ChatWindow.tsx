@@ -64,16 +64,20 @@ export const ChatWindow: FC = () => {
   const handleSend = useCallback(
     (e: SyntheticEvent) => {
       e.preventDefault();
-      if (!text.trim() || !activePartner || !user) return;
+      const body = text.trim();
+      if (!body || !activePartner || !user) return;
 
-      sendMessage(activePartner.id, text.trim());
+      const clientId = `c-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const sent = sendMessage(activePartner.id, body, clientId);
 
       addMessage(activePartner.id, {
-        message_id: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        client_id: clientId,
         from_id: user.id,
         to_id: activePartner.id,
-        content: text.trim(),
+        content: body,
         created_at: new Date().toISOString(),
+        isPending: sent,
+        failed: !sent,
       });
 
       setText('');
@@ -131,7 +135,7 @@ export const ChatWindow: FC = () => {
             const msg = messages[virtualItem.index];
             return (
               <div
-                key={msg.message_id || `${msg.from_id}-${msg.created_at}`}
+                key={msg.message_id || msg.client_id || `${msg.from_id}-${msg.created_at}`}
                 data-index={virtualItem.index}
                 ref={rowVirtualizer.measureElement}
                 style={{

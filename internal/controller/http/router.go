@@ -26,13 +26,16 @@ type Deps struct {
 const distDir = "./frontend/dist"
 
 func SetupRouter(h *server.Hertz, deps Deps) {
-	h.Use(api.CustomErrorHandler())
+	h.Use(middleware.RequestID(), api.CustomErrorHandler())
 
 	authHandler := NewAuthHandler(deps.Auth, deps.Cookie)
 	userHandler := NewUserHandler(deps.Users)
 	authLimiter := middleware.NewRateLimiter(5, 10)
 	authMiddleware := middleware.JWTAuth(deps.JWTSecret, deps.Cookie.Name)
 
+	h.GET("/health", func(_ context.Context, c *app.RequestContext) {
+		c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	})
 
 	auth := h.Group("/auth")
 	auth.Use(authLimiter.Handler())
@@ -40,8 +43,10 @@ func SetupRouter(h *server.Hertz, deps Deps) {
 	auth.POST("/login", authHandler.Login)
 	auth.POST("/logout", authHandler.Logout)
 
+	searchLimiter := middleware.NewRateLimiter(2, 10)
+
 	users := h.Group("/users", authMiddleware)
-	users.GET("/search", userHandler.Search)
+	users.GET("/search", searchLimiter.Handler(), userHandler.Search)
 	users.GET("/bulk", userHandler.GetBulk)
 	users.GET("/me", userHandler.Me)
 

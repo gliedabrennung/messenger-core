@@ -3,7 +3,6 @@ package message
 import (
 	"context"
 
-	"github.com/gliedabrennung/sedna/internal/common/logger"
 	"github.com/gliedabrennung/sedna/internal/entity"
 	"github.com/gocql/gocql"
 	"github.com/redis/go-redis/v9"
@@ -15,48 +14,55 @@ type Repository struct {
 }
 
 func NewRepository(scyllaSession *gocql.Session, rdb *redis.Client, keyspace string) *Repository {
-	return &Repository{
-		scylla: NewScyllaStorage(scyllaSession, keyspace),
-		redis:  NewRedisCache(rdb),
+	repo := &Repository{scylla: NewScyllaStorage(scyllaSession, keyspace)}
+	if rdb != nil {
+		repo.redis = NewRedisCache(rdb)
 	}
+	return repo
+}
+
+func (r *Repository) NewMessageID() string {
+	return gocql.TimeUUID().String()
 }
 
 func (r *Repository) Save(ctx context.Context, msg *entity.Message) error {
 	if err := r.scylla.Save(ctx, msg); err != nil {
 		return err
 	}
-
-	r.redis.CacheMessage(ctx, msg)
-	r.redis.Publish(ctx, msg)
-
+	if r.redis != nil {
+		r.redis.CacheMessage(ctx, msg)
+	}
 	return nil
 }
 
 func (r *Repository) GetChatHistory(ctx context.Context, chatID string, limit int, cursor string) ([]*entity.Message, string, error) {
-	if cursor == "" {
-		if cached, ok := r.redis.GetCachedHistory(ctx, chatID, limit); ok {
-			var nextCursor string
-			if len(cached) > limit {
-				nextCursor = cached[limit-1].MessageID
-				cached = cached[:limit]
-			}
-			return cached, nextCursor, nil
+	if cursor != "" {
+		return r.scylla.GetHistory(ctx, chatID, limit, cursor)
+	}
+
+	if r.redis != nil {
+		if page, next, ok := r.redis.GetCachedPage(ctx, chatID, limit); ok {
+			return page, next, nil
 		}
 	}
 
-	messages, nextCursor, err := r.scylla.GetHistory(ctx, chatID, limit, cursor)
+	fetch := limit
+	if fetch < cacheMaxLen {
+		fetch = cacheMaxLen
+	}
+
+	window, _, err := r.scylla.GetHistory(ctx, chatID, fetch, "")
 	if err != nil {
 		return nil, "", err
 	}
 
-	if cursor == "" && len(messages) > 0 {
-		r.redis.WarmUpCache(ctx, chatID, messages)
+	if r.redis != nil && len(window) > 0 {
+		r.redis.WarmUpCache(ctx, chatID, window)
 	}
 
-	return messages, nextCursor, nil
-}
-
-func (r *Repository) Subscribe(ctx context.Context, chatID string) (<-chan *entity.Message, func() error, error) {
-	logger.CtxInfof(ctx, "subscribing to chat %s", chatID)
-	return r.redis.Subscribe(ctx, chatID)
+	if len(window) > limit {
+		page := window[:limit]
+		return page, page[limit-1].MessageID, nil
+	}
+	return window, "", nil
 }

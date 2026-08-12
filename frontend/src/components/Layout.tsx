@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, type FC } from 'react';
+import { useEffect, useState, type FC } from 'react';
 import { Sidebar } from '@/components/Sidebar';
 import { ChatWindow } from '@/components/ChatWindow';
 import { useAuthStore } from '@/store/authStore';
@@ -8,41 +8,34 @@ import { Spinner } from '@/components/ui/Spinner';
 import type { User } from '@/types';
 
 export const Layout: FC = () => {
+  const userId = useAuthStore((s) => s.user?.id);
   const user = useAuthStore((s) => s.user);
   const [isChecking, setIsChecking] = useState(true);
-  const hasVerified = useRef(false);
 
   useEffect(() => {
-    if (hasVerified.current) return;
-
-    if (!user?.id) {
+    if (!userId) {
       useAuthStore.getState().logout();
       setIsChecking(false);
       return;
     }
 
-    hasVerified.current = true;
-    let cancelled = false;
+    const controller = new AbortController();
 
     api
-      .get<User>(`/users/me`)
+      .get<User>('/users/me', { signal: controller.signal })
       .then((res) => {
-        if (cancelled) return;
         if (res.data && res.data.id) {
           useAuthStore.getState().setAuth(res.data);
         }
       })
       .catch(() => {
-        /* session check failed — keep current user from localStorage, don't force logout */
       })
       .finally(() => {
-        if (!cancelled) setIsChecking(false);
+        if (!controller.signal.aborted) setIsChecking(false);
       });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id]);
+    return () => controller.abort();
+  }, [userId]);
 
   if (isChecking) {
     return (

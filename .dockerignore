@@ -1,4 +1,12 @@
 .git
+.github
 .env
 .idea
+.vscode
 *.exe
+
+frontend/node_modules
+frontend/dist
+
+/messenger-server
+/server

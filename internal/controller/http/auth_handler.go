@@ -19,10 +19,10 @@ type AuthService interface {
 }
 
 type CookieConfig struct {
-	Name     string
-	MaxAge   int
-	Secure   bool
-	Domain   string
+	Name   string
+	MaxAge int
+	Secure bool
+	Domain string
 }
 
 type AuthHandler struct {

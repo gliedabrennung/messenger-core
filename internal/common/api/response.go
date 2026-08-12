@@ -8,6 +8,8 @@ import (
 	"github.com/gliedabrennung/sedna/internal/common/logger"
 )
 
+const requestIDKey = "requestID"
+
 type Error struct {
 	Status    int    `json:"status"`
 	Code      string `json:"code"`
@@ -16,25 +18,40 @@ type Error struct {
 	RequestID string `json:"request_id,omitempty"`
 }
 
+func SetRequestID(c *app.RequestContext, id string) {
+	c.Set(requestIDKey, id)
+}
+
+func RequestID(c *app.RequestContext) string {
+	id, _ := c.Value(requestIDKey).(string)
+	return id
+}
+
 func ErrorResponse(c *app.RequestContext, status int, code string, message string, details any) {
-	requestID := string(c.GetHeader("X-Request-Id"))
-	resp := Error{
+	c.JSON(status, Error{
 		Status:    status,
 		Code:      code,
 		Message:   message,
 		Details:   details,
-		RequestID: requestID,
-	}
-	c.JSON(status, resp)
+		RequestID: RequestID(c),
+	})
 }
 
 func CustomErrorHandler() app.HandlerFunc {
 	return func(ctx context.Context, c *app.RequestContext) {
 		c.Next(ctx)
-		if len(c.Errors) > 0 {
-			err := c.Errors.Last()
-			ErrorResponse(c, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", err.Error(), nil)
-			logger.Errorf("unhandled error: %v", err)
+		if len(c.Errors) == 0 {
+			return
 		}
+
+		err := c.Errors.Last()
+		logger.CtxErrorf(ctx, "unhandled error: %v", err)
+
+		if c.Response.StatusCode() != http.StatusOK || len(c.Response.Body()) > 0 {
+			return
+		}
+
+		ErrorResponse(c, http.StatusInternalServerError,
+			"INTERNAL_SERVER_ERROR", "internal server error", nil)
 	}
 }

@@ -2,11 +2,9 @@
 .vscode/
 .env
 
-# Compiled binaries
 server
 *.exe
 /messenger-server
 
-# Frontend
 frontend/node_modules/
-package-lock.json
+frontend/dist/

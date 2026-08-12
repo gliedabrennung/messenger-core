@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/gliedabrennung/sedna/internal/apperr"
@@ -22,6 +24,14 @@ type AuthUseCase struct {
 	jwtTTL    time.Duration
 }
 
+var dummyPasswordHash = sync.OnceValue(func() []byte {
+	hash, err := bcrypt.GenerateFromPassword([]byte("sedna-timing-equalizer"), bcrypt.DefaultCost)
+	if err != nil {
+		return []byte("$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidinv")
+	}
+	return hash
+})
+
 func NewAuthUseCase(repo domain.UserRepository, jwtSecret string, jwtTTL time.Duration) *AuthUseCase {
 	return &AuthUseCase{
 		repo:      repo,
@@ -30,10 +40,25 @@ func NewAuthUseCase(repo domain.UserRepository, jwtSecret string, jwtTTL time.Du
 	}
 }
 
-func (a *AuthUseCase) Register(ctx context.Context, username, password string) (*entity.User, error) {
-	username = strings.TrimSpace(username)
+func validUsername(username string) bool {
 	runeCount := utf8.RuneCountInString(username)
 	if runeCount < 3 || runeCount > 24 {
+		return false
+	}
+	for _, r := range username {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r):
+		case r == '_', r == '.', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (a *AuthUseCase) Register(ctx context.Context, username, password string) (*entity.User, error) {
+	username = strings.TrimSpace(username)
+	if !validUsername(username) {
 		return nil, apperr.ErrInvalidUsername
 	}
 	if len(password) < 8 || len(password) > 72 {
@@ -67,6 +92,7 @@ func (a *AuthUseCase) Login(ctx context.Context, username, password string) (*en
 	user, err := a.repo.GetByUsername(ctx, username)
 	if err != nil {
 		if errors.Is(err, apperr.ErrUserNotFound) {
+			_ = bcrypt.CompareHashAndPassword(dummyPasswordHash(), []byte(password))
 			return nil, "", apperr.ErrInvalidCredentials
 		}
 		return nil, "", fmt.Errorf("login: get user: %w", err)
