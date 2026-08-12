@@ -17,6 +17,7 @@ import (
 type MessageService interface {
 	Available() bool
 	History(ctx context.Context, userID, partnerID int64, limit int, cursor string) ([]*entity.Message, string, error)
+	Chats(ctx context.Context, userID int64) ([]*entity.Chat, error)
 }
 
 type MessageHandler struct {
@@ -70,4 +71,25 @@ func (h *MessageHandler) GetHistory(ctx context.Context, c *app.RequestContext) 
 	}
 
 	c.JSON(http.StatusOK, historyResponse{Messages: messages, NextCursor: nextCursor})
+}
+
+func (h *MessageHandler) GetChats(ctx context.Context, c *app.RequestContext) {
+	userID, ok := authctx.UserID(c)
+	if !ok {
+		api.ErrorResponse(c, http.StatusUnauthorized, "UNAUTHORIZED", "missing user context", nil)
+		return
+	}
+
+	chats, err := h.messages.Chats(ctx, userID)
+	if err != nil {
+		logger.CtxErrorf(ctx, "failed to list chats: %v", err)
+		api.ErrorResponse(c, http.StatusInternalServerError, "INTERNAL_ERROR", "failed to list conversations", nil)
+		return
+	}
+
+	c.JSON(http.StatusOK, chatsResponse{Chats: chats})
+}
+
+type chatsResponse struct {
+	Chats []*entity.Chat `json:"chats"`
 }

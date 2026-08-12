@@ -18,4 +18,5 @@ type MessageRepository interface {
 	NewMessageID() string
 	Save(ctx context.Context, msg *entity.Message) error
 	GetChatHistory(ctx context.Context, chatID string, limit int, cursor string) ([]*entity.Message, string, error)
+	ListChats(ctx context.Context, userID int64, limit int) ([]*entity.Chat, error)
 }

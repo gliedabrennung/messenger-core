@@ -57,6 +57,7 @@ func SetupRouter(h *server.Hertz, deps Deps) {
 
 	msgHandler := NewMessageHandler(deps.Messages)
 	h.GET("/messages", authMiddleware, msgHandler.GetHistory)
+	h.GET("/chats", authMiddleware, msgHandler.GetChats)
 
 	h.GET("/ws", authMiddleware, deps.WsHandler)
 
@@ -82,6 +83,7 @@ func serveSPA(_ context.Context, c *app.RequestContext) {
 	if strings.HasPrefix(path, "/auth") ||
 		strings.HasPrefix(path, "/users") ||
 		strings.HasPrefix(path, "/messages") ||
+		strings.HasPrefix(path, "/chats") ||
 		strings.HasPrefix(path, "/ws") ||
 		strings.HasPrefix(path, "/health") {
 		api.ErrorResponse(c, http.StatusNotFound,

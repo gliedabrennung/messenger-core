@@ -3,6 +3,7 @@ import { Search, LogOut } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { useChatStore } from '@/store/chatStore';
 import { useSearchUsers } from '@/hooks/useSearchUsers';
+import { useChats } from '@/hooks/useChats';
 import { PartnerItem } from '@/components/PartnerItem';
 import { Avatar } from '@/components/ui/Avatar';
 import { Input } from '@/components/ui/Input';
@@ -13,6 +14,7 @@ import type { User } from '@/types';
 export const Sidebar: FC = () => {
   const [search, setSearch] = useState('');
   const { results: searchResults, isLoading: isSearching } = useSearchUsers(search);
+  const { chats, isLoading: isLoadingChats } = useChats();
 
   const user = useAuthStore((state) => state.user);
   const logout = useAuthStore((state) => state.logout);
@@ -39,7 +41,9 @@ export const Sidebar: FC = () => {
     navigate('/login');
   }, [logout, navigate]);
 
+  const previews = new Map(chats.map((c) => [c.peer_id, c.last_message]));
   const displayList = search ? searchResults : recentChats;
+  const isBusy = search ? isSearching : isLoadingChats;
 
   return (
     <div className="w-80 flex-shrink-0 bg-[var(--color-surface-secondary)] border-r border-[var(--color-border-primary)] flex flex-col h-screen">
@@ -80,13 +84,13 @@ export const Sidebar: FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto px-1.5 py-1">
-        {isSearching && (
+        {isBusy && (
           <div className="p-4 text-center text-xs text-[var(--color-text-muted)] animate-pulse-soft">
-            Searching...
+            {search ? 'Searching...' : 'Loading conversations...'}
           </div>
         )}
 
-        {!isSearching && displayList.length === 0 && (
+        {!isBusy && displayList.length === 0 && (
           <div className="p-8 text-center animate-fade-in">
             <div className="w-12 h-12 rounded-full bg-[var(--color-surface-tertiary)] flex items-center justify-center mx-auto mb-3">
               <Search size={20} className="text-[var(--color-text-muted)]" />
@@ -102,13 +106,14 @@ export const Sidebar: FC = () => {
           </div>
         )}
 
-        {!isSearching &&
+        {!isBusy &&
           displayList.map((partner) => (
             <PartnerItem
               key={partner.id}
               partner={partner}
               isActive={activePartner?.id === partner.id}
               isMe={partner.id === user?.id}
+              preview={search ? undefined : previews.get(partner.id)}
               onClick={() => handleSelectPartner(partner)}
             />
           ))}

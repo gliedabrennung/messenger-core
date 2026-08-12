@@ -20,6 +20,14 @@ type mockMessageRepo struct {
 	getChatHistory func(ctx context.Context, chatID string, limit int, cursor string) ([]*entity.Message, string, error)
 	save           func(ctx context.Context, msg *entity.Message) error
 	newMessageID   func() string
+	listChats      func(ctx context.Context, userID int64, limit int) ([]*entity.Chat, error)
+}
+
+func (m *mockMessageRepo) ListChats(ctx context.Context, userID int64, limit int) ([]*entity.Chat, error) {
+	if m.listChats != nil {
+		return m.listChats(ctx, userID, limit)
+	}
+	return nil, nil
 }
 
 func (m *mockMessageRepo) NewMessageID() string {

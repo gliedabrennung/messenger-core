@@ -221,6 +221,10 @@ func (r *recordingRepo) GetChatHistory(context.Context, string, int, string) ([]
 	return nil, "", nil
 }
 
+func (r *recordingRepo) ListChats(context.Context, int64, int) ([]*entity.Chat, error) {
+	return nil, nil
+}
+
 func TestHub_Persist_WritesAsynchronously(t *testing.T) {
 	repo := &recordingRepo{done: make(chan struct{})}
 	ctx, cancel := context.WithCancel(context.Background())

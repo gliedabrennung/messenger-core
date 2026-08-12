@@ -7,10 +7,11 @@ interface PartnerItemProps {
   partner: User;
   isActive: boolean;
   isMe?: boolean;
+  preview?: string;
   onClick: () => void;
 }
 
-const PartnerItemBase: FC<PartnerItemProps> = ({ partner, isActive, isMe, onClick }) => {
+const PartnerItemBase: FC<PartnerItemProps> = ({ partner, isActive, isMe, preview, onClick }) => {
   return (
     <button
       id={`partner-${partner.id}`}
@@ -30,7 +31,7 @@ const PartnerItemBase: FC<PartnerItemProps> = ({ partner, isActive, isMe, onClic
           )}
         </div>
         <div className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">
-          ID: {partner.id}
+          {preview || `ID: ${partner.id}`}
         </div>
       </div>
     </button>

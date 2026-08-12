@@ -3,7 +3,9 @@ package message
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gliedabrennung/sedna/internal/common/logger"
 	"github.com/gliedabrennung/sedna/internal/entity"
@@ -50,6 +52,21 @@ func InitSchema(ctx context.Context, hosts []string, keyspace string) error {
 	if err := session.Query(createTableQuery).WithContext(ctx).Exec(); err != nil {
 		logger.CtxErrorf(ctx, "failed to create direct_messages table in %s: %v", keyspace, err)
 		return fmt.Errorf("scylla schema init: create table: %w", err)
+	}
+
+	createChatsQuery := fmt.Sprintf(`
+		CREATE TABLE IF NOT EXISTS %s.user_chats (
+			user_id bigint,
+			peer_id bigint,
+			chat_id text,
+			last_message text,
+			last_from_id bigint,
+			last_activity timestamp,
+			PRIMARY KEY ((user_id), peer_id)
+		)`, keyspace)
+	if err := session.Query(createChatsQuery).WithContext(ctx).Exec(); err != nil {
+		logger.CtxErrorf(ctx, "failed to create user_chats table in %s: %v", keyspace, err)
+		return fmt.Errorf("scylla schema init: create user_chats: %w", err)
 	}
 
 	logger.CtxInfof(ctx, "scylla schema initialized successfully in keyspace %s", keyspace)
@@ -155,4 +172,77 @@ func (s *ScyllaStorage) GetHistory(ctx context.Context, chatID string, limit int
 
 	logger.CtxDebugf(ctx, "scylla retrieved %d messages for chat %s", len(messages), chatID)
 	return messages, nextCursor, nil
+}
+
+const maxChatPreviewLen = 200
+
+func (s *ScyllaStorage) TouchChats(ctx context.Context, msg *entity.Message) error {
+	preview := msg.Content
+	if utf8.RuneCountInString(preview) > maxChatPreviewLen {
+		preview = string([]rune(preview)[:maxChatPreviewLen]) + "…"
+	}
+
+	query := fmt.Sprintf(`
+		INSERT INTO %s.user_chats
+		(user_id, peer_id, chat_id, last_message, last_from_id, last_activity)
+		VALUES (?, ?, ?, ?, ?, ?)
+		USING TIMESTAMP ?`, s.keyspace)
+
+	writeTime := msg.CreatedAt.UnixMicro()
+
+	sides := [2]struct{ owner, peer int64 }{
+		{msg.FromID, msg.ToID},
+		{msg.ToID, msg.FromID},
+	}
+
+	for _, side := range sides {
+		err := s.session.Query(query,
+			side.owner, side.peer, msg.ChatID, preview, msg.FromID, msg.CreatedAt, writeTime,
+		).WithContext(ctx).Exec()
+		if err != nil {
+			return fmt.Errorf("scylla: touch chat for user %d: %w", side.owner, err)
+		}
+	}
+	return nil
+}
+
+func (s *ScyllaStorage) ListChats(ctx context.Context, userID int64, limit int) ([]*entity.Chat, error) {
+	query := fmt.Sprintf(`
+		SELECT peer_id, chat_id, last_message, last_from_id, last_activity
+		FROM %s.user_chats
+		WHERE user_id = ?`, s.keyspace)
+
+	iter := s.session.Query(query, userID).WithContext(ctx).Iter()
+
+	var (
+		chats        []*entity.Chat
+		peerID       int64
+		chatID       string
+		lastMessage  string
+		lastFromID   int64
+		lastActivity time.Time
+	)
+
+	for iter.Scan(&peerID, &chatID, &lastMessage, &lastFromID, &lastActivity) {
+		chats = append(chats, &entity.Chat{
+			ChatID:       chatID,
+			PeerID:       peerID,
+			LastMessage:  lastMessage,
+			LastFromID:   lastFromID,
+			LastActivity: lastActivity,
+		})
+	}
+
+	if err := iter.Close(); err != nil {
+		logger.CtxErrorf(ctx, "scylla list chats for user %d: %v", userID, err)
+		return nil, fmt.Errorf("scylla: list chats: %w", err)
+	}
+
+	sort.Slice(chats, func(i, j int) bool {
+		return chats[i].LastActivity.After(chats[j].LastActivity)
+	})
+	if limit > 0 && len(chats) > limit {
+		chats = chats[:limit]
+	}
+	return chats, nil
 }

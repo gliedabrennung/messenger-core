@@ -105,6 +105,24 @@ GET /messages?partner_id=2&limit=50&cursor=<next_cursor>
 
 Newest first. An empty `next_cursor` means there is nothing older.
 
+### Conversations
+
+```
+GET /chats
+
+200 OK
+{
+  "chats": [
+    {"chat_id": "1:2", "peer_id": 2, "peer_username": "johndoe",
+     "last_message": "Hello!", "last_from_id": 1,
+     "last_activity": "2026-05-22T20:00:00Z"}
+  ]
+}
+```
+
+Most recently active first. The list is maintained server-side, so it follows
+the user to a new device.
+
 ### Other endpoints
 
 | Route | Purpose |
@@ -164,6 +182,12 @@ Limits: 4000 characters per message, 10 messages per second per connection
 * **History caching** keeps a trailing window per chat in Redis. The cache is
   only trusted when it holds more than one page, because a shorter window cannot
   prove that nothing older exists.
+* **Conversations** are written to `user_chats` on both sides of every message,
+  using the message time as the Cassandra write timestamp so an out-of-order
+  write cannot overwrite a newer one. The list is read as one partition and
+  ordered in the application, which avoids the tombstone churn of keeping
+  activity time in the clustering key.
 * **Schema**: Postgres migrations are embedded in the binary and applied at
-  startup; the Scylla keyspace is created by the server, with
+  startup under an advisory lock, so several instances can boot at once; the
+  Scylla keyspace is created by the server, with
   `migrations/scylla/direct_messages.cql` as the reference copy.

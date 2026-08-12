@@ -20,3 +20,12 @@ func MakeChatID(userA, userB int64) string {
 	}
 	return fmt.Sprintf("%d:%d", userA, userB)
 }
+
+type Chat struct {
+	ChatID       string    `json:"chat_id"`
+	PeerID       int64     `json:"peer_id"`
+	PeerUsername string    `json:"peer_username"`
+	LastMessage  string    `json:"last_message"`
+	LastFromID   int64     `json:"last_from_id"`
+	LastActivity time.Time `json:"last_activity"`
+}

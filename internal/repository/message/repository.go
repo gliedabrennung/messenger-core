@@ -3,6 +3,8 @@ package message
 import (
 	"context"
 
+	"github.com/gliedabrennung/sedna/internal/common/logger"
+
 	"github.com/gliedabrennung/sedna/internal/entity"
 	"github.com/gocql/gocql"
 	"github.com/redis/go-redis/v9"
@@ -32,7 +34,14 @@ func (r *Repository) Save(ctx context.Context, msg *entity.Message) error {
 	if r.redis != nil {
 		r.redis.CacheMessage(ctx, msg)
 	}
+	if err := r.scylla.TouchChats(ctx, msg); err != nil {
+		logger.CtxErrorf(ctx, "update conversation list for chat %s: %v", msg.ChatID, err)
+	}
 	return nil
+}
+
+func (r *Repository) ListChats(ctx context.Context, userID int64, limit int) ([]*entity.Chat, error) {
+	return r.scylla.ListChats(ctx, userID, limit)
 }
 
 func (r *Repository) GetChatHistory(ctx context.Context, chatID string, limit int, cursor string) ([]*entity.Message, string, error) {

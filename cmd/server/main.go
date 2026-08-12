@@ -147,6 +147,9 @@ func run() error {
 		logger.Warn("redis unavailable: websocket delivery limited to this instance")
 	}
 
+	messageUseCase := usecase.NewMessageUseCase(msgRepo)
+	messageUseCase.SetUsers(repo)
+
 	hub := ws.NewHubWithFanout(msgRepo, msgFanout)
 	hub.SetRecipientValidator(repo)
 	go hub.Run(hubCtx)
@@ -185,7 +188,7 @@ func run() error {
 	http.SetupRouter(h, http.Deps{
 		Auth:      authUseCase,
 		Users:     userUseCase,
-		Messages:  usecase.NewMessageUseCase(msgRepo),
+		Messages:  messageUseCase,
 		WsHandler: wsHandler,
 		JWTSecret: cfg.JWTSecret,
 		Cookie:    cookieCfg,

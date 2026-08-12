@@ -52,7 +52,11 @@ func TestHub_Run_DirectMessage(t *testing.T) {
 		t.Fatal("message not delivered to client")
 	}
 
-	drain(c1)
+	select {
+	case <-c1.send:
+	case <-time.After(time.Second):
+		t.Fatal("sender never received the echo of its own message")
+	}
 
 	h.Unregister(c1)
 	h.Unregister(c2)
@@ -64,16 +68,6 @@ func TestHub_Run_DirectMessage(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("channel c1 not closed")
-	}
-}
-
-func drain(c *Client) {
-	for {
-		select {
-		case <-c.send:
-		default:
-			return
-		}
 	}
 }
 

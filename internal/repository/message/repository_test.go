@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestRepository_Integration(t *testing.T) {
 	defer scyllaSession.Close()
 
 	repo := NewRepository(scyllaSession, redisClient, "ws")
-	chatID := "test:repo:1"
+	chatID := fmt.Sprintf("test:repo:%d", time.Now().UnixNano())
 
 	redisClient.Del(ctx, "chat:"+chatID+":cache")
 

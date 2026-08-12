@@ -22,3 +22,16 @@ export interface ChatHistoryResponse {
 }
 
 export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected';
+
+export interface Chat {
+  chat_id: string;
+  peer_id: number;
+  peer_username: string;
+  last_message: string;
+  last_from_id: number;
+  last_activity: string;
+}
+
+export interface ChatListResponse {
+  chats: Chat[];
+}

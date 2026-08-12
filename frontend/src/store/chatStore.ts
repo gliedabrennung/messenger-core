@@ -15,6 +15,8 @@ interface ChatState {
   recentChats: User[];
   setRecentChats: (chats: User[]) => void;
   addRecentChat: (user: User) => void;
+  chatRefreshToken: number;
+  requestChatRefresh: () => void;
 }
 
 function loadRecentChats(): User[] {
@@ -97,4 +99,7 @@ export const useChatStore = create<ChatState>((set) => ({
       persistRecentChats(updated);
       return { recentChats: updated };
     }),
+
+  chatRefreshToken: 0,
+  requestChatRefresh: () => set((state) => ({ chatRefreshToken: state.chatRefreshToken + 1 })),
 }));

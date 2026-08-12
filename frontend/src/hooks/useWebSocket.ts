@@ -110,6 +110,10 @@ export const WebSocketProvider: FC<{ children: ReactNode }> = ({ children }) => 
             content: data.message,
             created_at: data.created_at ?? new Date().toISOString(),
           });
+
+          if (!chat.recentChats.some((c) => c.id === partnerId)) {
+            chat.requestChatRefresh();
+          }
         } catch {
           /* malformed message */
         }

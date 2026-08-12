@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+const migrationLockKey int64 = 8891234509876
+
 const migrationsTable = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
 	version     TEXT        PRIMARY KEY,
@@ -18,6 +20,22 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 )`
 
 func Migrate(ctx context.Context, pool *pgxpool.Pool, src fs.FS) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("migrate: acquire connection: %w", err)
+	}
+	defer conn.Release()
+
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockKey); err != nil {
+		return fmt.Errorf("migrate: acquire lock: %w", err)
+	}
+	defer func() {
+		if _, err := conn.Exec(context.WithoutCancel(ctx),
+			`SELECT pg_advisory_unlock($1)`, migrationLockKey); err != nil {
+			logger.CtxErrorf(ctx, "release migration lock: %v", err)
+		}
+	}()
+
 	if _, err := pool.Exec(ctx, migrationsTable); err != nil {
 		return fmt.Errorf("migrate: create migrations table: %w", err)
 	}
