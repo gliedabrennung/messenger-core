@@ -27,7 +27,7 @@ func NewPostgresRepository(pool *pgxpool.Pool) *Repository {
 
 func (repo *Repository) Create(ctx context.Context, user *entity.User) error {
 	query := `
-		INSERT INTO users (username, password)
+		INSERT INTO users (username, password_hash)
 		VALUES ($1, $2)
 		RETURNING id, created_at, updated_at`
 	err := repo.db.QueryRow(ctx, query, user.Username, user.PasswordHash).
@@ -44,7 +44,7 @@ func (repo *Repository) Create(ctx context.Context, user *entity.User) error {
 
 func (repo *Repository) GetByUsername(ctx context.Context, username string) (*entity.User, error) {
 	query := `
-		SELECT id, username, password, created_at, updated_at
+		SELECT id, username, password_hash, created_at, updated_at
 		FROM users
 		WHERE lower(username) = lower($1)`
 	user := &entity.User{}
@@ -113,7 +113,7 @@ func (repo *Repository) GetByIDs(ctx context.Context, ids []int64) ([]entity.Use
 		return nil, nil
 	}
 
-	q := `SELECT id, username FROM users WHERE id = ANY($1)`
+	q := `SELECT id, username, created_at, updated_at FROM users WHERE id = ANY($1)`
 	rows, err := repo.db.Query(ctx, q, ids)
 	if err != nil {
 		return nil, fmt.Errorf("postgres: get users by ids: %w", err)
@@ -123,8 +123,8 @@ func (repo *Repository) GetByIDs(ctx context.Context, ids []int64) ([]entity.Use
 	var users []entity.User
 	for rows.Next() {
 		var u entity.User
-		if err := rows.Scan(&u.ID, &u.Username); err != nil {
-			return nil, err
+		if err := rows.Scan(&u.ID, &u.Username, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("postgres: scan user: %w", err)
 		}
 		users = append(users, u)
 	}

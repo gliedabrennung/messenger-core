@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/gliedabrennung/sedna/internal/apperr"
 	"github.com/gliedabrennung/sedna/internal/common/api"
+	"github.com/gliedabrennung/sedna/internal/common/authctx"
 	"github.com/gliedabrennung/sedna/internal/common/logger"
 	"github.com/gliedabrennung/sedna/internal/entity"
 )
@@ -16,6 +18,7 @@ import (
 type AuthService interface {
 	Register(ctx context.Context, username, password string) (*entity.User, error)
 	Login(ctx context.Context, username, password string) (*entity.User, string, error)
+	Logout(ctx context.Context, tokenID string, expiresAt time.Time) error
 }
 
 type CookieConfig struct {
@@ -102,7 +105,14 @@ func (h *AuthHandler) Login(ctx context.Context, c *app.RequestContext) {
 	c.JSON(http.StatusOK, loginResponse{Token: token, User: user})
 }
 
-func (h *AuthHandler) Logout(_ context.Context, c *app.RequestContext) {
+func (h *AuthHandler) Logout(ctx context.Context, c *app.RequestContext) {
+	tokenID, _ := authctx.TokenID(c)
+	expiresAt, _ := authctx.TokenExp(c)
+
+	if err := h.auth.Logout(ctx, tokenID, expiresAt); err != nil {
+		logger.CtxErrorf(ctx, "logout: %v", err)
+	}
+
 	h.clearTokenCookie(c)
 	c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }

@@ -79,19 +79,56 @@ func main() {
 	time.Sleep(100 * time.Millisecond)
 
 	msg := map[string]any{
-		"to":      fmt.Sprintf("%d", r2.User.ID),
-		"message": "hello from 1",
+		"to":        fmt.Sprintf("%d", r2.User.ID),
+		"message":   "hello from 1",
+		"client_id": "smoke-1",
 	}
 	if err := c1.WriteJSON(msg); err != nil {
 		logger.Fatal("write:", err)
 	}
 
-	if err := c2.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+	if err := c1.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
 		logger.Fatal("set read deadline:", err)
 	}
-	_, p, err := c2.ReadMessage()
-	if err != nil {
-		logger.Fatal("read c2:", err)
+	ack := readFrame(c1, "ack")
+	fmt.Printf("User 1 ack: message_id=%s client_id=%s\n", ack.MessageID, ack.ClientID)
+
+	if err := c2.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		logger.Fatal("set read deadline:", err)
 	}
-	fmt.Printf("User 2 received: %s\n", p)
+	got := readFrame(c2, "message")
+	fmt.Printf("User 2 received: %s (message_id=%s)\n", got.Message, got.MessageID)
+
+	if got.MessageID != ack.MessageID {
+		logger.Fatalf("delivered id %s does not match acked id %s", got.MessageID, ack.MessageID)
+	}
+}
+
+type frame struct {
+	Type      string `json:"type"`
+	Code      string `json:"code"`
+	ClientID  string `json:"client_id"`
+	MessageID string `json:"message_id"`
+	From      int64  `json:"from"`
+	To        int64  `json:"to"`
+	Message   string `json:"message"`
+}
+
+func readFrame(c *websocket.Conn, want string) frame {
+	for {
+		_, payload, err := c.ReadMessage()
+		if err != nil {
+			logger.Fatalf("read %s frame: %v", want, err)
+		}
+		var f frame
+		if err := json.Unmarshal(payload, &f); err != nil {
+			logger.Fatalf("unmarshal frame: %v", err)
+		}
+		if f.Type == "error" {
+			logger.Fatalf("server rejected the message: %s", payload)
+		}
+		if f.Type == want {
+			return f
+		}
+	}
 }

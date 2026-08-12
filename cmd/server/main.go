@@ -10,10 +10,12 @@ import (
 	"github.com/gliedabrennung/sedna/internal/common/logger"
 	"github.com/gliedabrennung/sedna/internal/config"
 	"github.com/gliedabrennung/sedna/internal/controller/http"
+	"github.com/gliedabrennung/sedna/internal/controller/http/middleware"
 	"github.com/gliedabrennung/sedna/internal/domain"
 	"github.com/gliedabrennung/sedna/internal/fanout"
 	"github.com/gliedabrennung/sedna/internal/repository/message"
 	"github.com/gliedabrennung/sedna/internal/repository/postgres"
+	"github.com/gliedabrennung/sedna/internal/repository/tokens"
 	"github.com/gliedabrennung/sedna/internal/usecase"
 	"github.com/gliedabrennung/sedna/internal/ws"
 	"github.com/gliedabrennung/sedna/migrations"
@@ -117,6 +119,16 @@ func run() error {
 
 	repo := postgres.NewPostgresRepository(dbpool)
 	authUseCase := usecase.NewAuthUseCase(repo, cfg.JWTSecret, cfg.JWTTTL)
+
+	var revoked middleware.RevocationChecker
+	if rdb != nil {
+		denylist := tokens.NewRedisDenylist(rdb)
+		authUseCase.SetDenylist(denylist)
+		revoked = denylist
+	} else {
+		logger.Warn("redis unavailable: logout cannot revoke issued tokens")
+	}
+
 	userUseCase := usecase.NewUserUseCase(repo)
 
 	hubCtx, hubCancel := context.WithCancel(ctx)
@@ -173,10 +185,11 @@ func run() error {
 	http.SetupRouter(h, http.Deps{
 		Auth:      authUseCase,
 		Users:     userUseCase,
-		MsgRepo:   msgRepo,
+		Messages:  usecase.NewMessageUseCase(msgRepo),
 		WsHandler: wsHandler,
 		JWTSecret: cfg.JWTSecret,
 		Cookie:    cookieCfg,
+		Revoked:   revoked,
 	})
 
 	h.Spin()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/cloudwego/hertz/pkg/app"
@@ -12,6 +13,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/route"
 	"github.com/gliedabrennung/sedna/internal/common/authctx"
 	"github.com/gliedabrennung/sedna/internal/entity"
+	"github.com/gliedabrennung/sedna/internal/usecase"
 )
 
 type mockMessageRepo struct {
@@ -47,7 +49,7 @@ func TestMessageHandler_GetHistory(t *testing.T) {
 			return []*entity.Message{{MessageID: "1", Content: "hello"}}, "next", nil
 		},
 	}
-	h := NewMessageHandler(mockRepo)
+	h := NewMessageHandler(usecase.NewMessageUseCase(mockRepo))
 	engine := route.NewEngine(config.NewOptions([]config.Option{}))
 	engine.Use(func(c context.Context, ctx *app.RequestContext) {
 		if string(ctx.Request.URI().Path()) == "/history_auth" {
@@ -90,4 +92,53 @@ func TestMessageHandler_GetHistory(t *testing.T) {
 			t.Errorf("expected 400, got %d", w.Code)
 		}
 	})
+
+	t.Run("NonPositivePartnerID", func(t *testing.T) {
+		w := ut.PerformRequest(engine, http.MethodGet, "/history_auth?partner_id=0", nil)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400, got %d", w.Code)
+		}
+	})
+}
+
+func TestMessageHandler_NoStorage(t *testing.T) {
+	h := NewMessageHandler(usecase.NewMessageUseCase(nil))
+	engine := route.NewEngine(config.NewOptions([]config.Option{}))
+	engine.Use(func(c context.Context, ctx *app.RequestContext) {
+		authctx.SetUserID(ctx, 1)
+		ctx.Next(c)
+	})
+	engine.GET("/history", h.GetHistory)
+
+	w := ut.PerformRequest(engine, http.MethodGet, "/history?partner_id=2", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if body := w.Body.String(); !strings.Contains(body, `"messages":[]`) {
+		t.Errorf("expected an empty message list, got %s", body)
+	}
+}
+
+func TestMessageHandler_ClampsLimit(t *testing.T) {
+	var gotLimit int
+	mockRepo := &mockMessageRepo{
+		getChatHistory: func(_ context.Context, _ string, limit int, _ string) ([]*entity.Message, string, error) {
+			gotLimit = limit
+			return nil, "", nil
+		},
+	}
+	h := NewMessageHandler(usecase.NewMessageUseCase(mockRepo))
+	engine := route.NewEngine(config.NewOptions([]config.Option{}))
+	engine.Use(func(c context.Context, ctx *app.RequestContext) {
+		authctx.SetUserID(ctx, 1)
+		ctx.Next(c)
+	})
+	engine.GET("/history", h.GetHistory)
+
+	for _, q := range []string{"limit=0", "limit=-5", "limit=100000", "limit=abc"} {
+		ut.PerformRequest(engine, http.MethodGet, "/history?partner_id=2&"+q, nil)
+		if gotLimit != 50 {
+			t.Errorf("%s: expected the default 50, got %d", q, gotLimit)
+		}
+	}
 }

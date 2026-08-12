@@ -17,7 +17,7 @@ import (
 
 func TestJWTAuth(t *testing.T) {
 	secret := "testsecret"
-	mw := JWTAuth(secret)
+	mw := JWTAuth(JWTConfig{Secret: secret})
 
 	engine := route.NewEngine(config.NewOptions([]config.Option{}))
 	engine.GET("/protected", mw, func(ctx context.Context, c *app.RequestContext) {

@@ -26,7 +26,7 @@ const PartnerItemBase: FC<PartnerItemProps> = ({ partner, isActive, isMe, onClic
         <div className="text-sm font-medium text-[var(--color-text-primary)] truncate">
           {partner.username}
           {isMe && (
-            <span className="ml-1.5 text-xs font-normal text-[var(--color-accent-start)]">(Я)</span>
+            <span className="ml-1.5 text-xs font-normal text-[var(--color-accent-start)]">(you)</span>
           )}
         </div>
         <div className="text-xs text-[var(--color-text-muted)] truncate mt-0.5">

@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/gliedabrennung/sedna/internal/entity"
+	"github.com/gliedabrennung/sedna/internal/usecase"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -26,6 +27,8 @@ func (stubAuthService) Register(context.Context, string, string) (*entity.User, 
 func (stubAuthService) Login(context.Context, string, string) (*entity.User, string, error) {
 	return &entity.User{ID: 1, Username: "stub"}, "stub-token", nil
 }
+
+func (stubAuthService) Logout(context.Context, string, time.Time) error { return nil }
 
 type stubUserService struct{}
 
@@ -44,7 +47,7 @@ func routerUnderTest(t *testing.T) *server.Hertz {
 	SetupRouter(h, Deps{
 		Auth:      stubAuthService{},
 		Users:     stubUserService{},
-		MsgRepo:   nil,
+		Messages:  usecase.NewMessageUseCase(nil),
 		WsHandler: func(_ context.Context, c *app.RequestContext) { c.Status(http.StatusOK) },
 		JWTSecret: testJWTSecret,
 		Cookie:    CookieConfig{Name: "token", MaxAge: 3600},
@@ -110,7 +113,6 @@ func TestSetupRouter_AuthRoutesRegistered(t *testing.T) {
 	}{
 		{path: "/auth/register", expect: http.StatusCreated},
 		{path: "/auth/login", expect: http.StatusOK},
-		{path: "/auth/logout", expect: http.StatusOK},
 	}
 
 	for _, tt := range tests {

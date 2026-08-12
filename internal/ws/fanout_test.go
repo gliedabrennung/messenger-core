@@ -84,11 +84,16 @@ func TestHub_Send_GoesThroughFanout(t *testing.T) {
 	}
 
 	published, _, _ := f.snapshot()
-	if len(published) != 1 {
-		t.Fatalf("expected 1 published message, got %d", len(published))
+
+	if len(published) != 2 {
+		t.Fatalf("expected 2 published messages, got %d", len(published))
 	}
-	if published[0].UserID != 2 {
-		t.Errorf("expected publish addressed to user 2, got %d", published[0].UserID)
+	addressed := map[int64]bool{}
+	for _, p := range published {
+		addressed[p.UserID] = true
+	}
+	if !addressed[2] || !addressed[1] {
+		t.Errorf("expected publishes to both users, got %v", addressed)
 	}
 
 	var got DirectMessage
@@ -282,4 +287,143 @@ func TestHub_Stop_IsIdempotent(t *testing.T) {
 	h := NewHub(nil)
 	h.Stop()
 	h.Stop()
+}
+
+func TestHub_MultipleConnectionsPerUser(t *testing.T) {
+	h, cancel := fanoutHub(t, nil)
+	defer cancel()
+
+	phone := testClient(2)
+	laptop := testClient(2)
+	registerClient(t, h, phone)
+	registerClient(t, h, laptop)
+
+	if !h.Send(DirectMessage{MessageID: "m1", From: 1, To: 2, Message: "both devices"}) {
+		t.Fatal("Send returned false")
+	}
+
+	for name, c := range map[string]*Client{"phone": phone, "laptop": laptop} {
+		select {
+		case raw := <-c.send:
+			var msg DirectMessage
+			if err := json.Unmarshal(raw, &msg); err != nil {
+				t.Fatalf("%s: unmarshal: %v", name, err)
+			}
+			if msg.Message != "both devices" {
+				t.Errorf("%s: got %q", name, msg.Message)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s never received the message", name)
+		}
+	}
+}
+
+func TestHub_RegisterDoesNotEvictExistingConnection(t *testing.T) {
+	h, cancel := fanoutHub(t, nil)
+	defer cancel()
+
+	first := testClient(3)
+	registerClient(t, h, first)
+	second := testClient(3)
+	registerClient(t, h, second)
+
+	select {
+	case _, ok := <-first.send:
+		if !ok {
+			t.Fatal("a second device closed the first connection")
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestHub_UnregisterLeavesSiblingConnections(t *testing.T) {
+	h, cancel := fanoutHub(t, nil)
+	defer cancel()
+
+	phone := testClient(4)
+	laptop := testClient(4)
+	registerClient(t, h, phone)
+	registerClient(t, h, laptop)
+
+	h.Unregister(phone)
+
+	if !h.Send(DirectMessage{MessageID: "m1", From: 1, To: 4, Message: "still here"}) {
+		t.Fatal("Send returned false")
+	}
+
+	select {
+	case raw := <-laptop.send:
+		if len(raw) == 0 {
+			t.Fatal("empty payload")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("closing one connection stopped delivery to the other")
+	}
+}
+
+func TestHub_Send_EchoesToSender(t *testing.T) {
+	h, cancel := fanoutHub(t, nil)
+	defer cancel()
+
+	sender := testClient(1)
+	recipient := testClient(2)
+	registerClient(t, h, sender)
+	registerClient(t, h, recipient)
+
+	h.Send(DirectMessage{MessageID: "m1", From: 1, To: 2, Message: "sent from my phone"})
+
+	select {
+	case raw := <-sender.send:
+		var msg DirectMessage
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if msg.MessageID != "m1" || msg.To != 2 {
+			t.Errorf("unexpected echo: %+v", msg)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("sender never received an echo, so other devices cannot see it")
+	}
+}
+
+func TestHub_Send_SelfMessageIsNotDuplicated(t *testing.T) {
+	h, cancel := fanoutHub(t, nil)
+	defer cancel()
+
+	c := testClient(1)
+	registerClient(t, h, c)
+
+	h.Send(DirectMessage{MessageID: "m1", From: 1, To: 1, Message: "note to self"})
+
+	select {
+	case <-c.send:
+	case <-time.After(time.Second):
+		t.Fatal("message never delivered")
+	}
+
+	select {
+	case extra := <-c.send:
+		t.Fatalf("delivered twice: %s", extra)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestHub_ContextCancelReleasesRegister(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	h := NewHub(nil)
+	go h.Run(ctx)
+
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		h.Unregister(testClient(1))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Unregister blocked forever after the context was cancelled")
+	}
 }

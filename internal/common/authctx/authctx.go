@@ -9,6 +9,7 @@ import (
 const (
 	userIDKey   = "userID"
 	tokenExpKey = "tokenExp"
+	tokenIDKey  = "tokenID"
 )
 
 func SetUserID(c *app.RequestContext, id int64) {
@@ -35,4 +36,17 @@ func TokenExp(c *app.RequestContext) (time.Time, bool) {
 	}
 	exp, ok := v.(time.Time)
 	return exp, ok
+}
+
+func SetTokenID(c *app.RequestContext, id string) {
+	c.Set(tokenIDKey, id)
+}
+
+func TokenID(c *app.RequestContext) (string, bool) {
+	v, ok := c.Get(tokenIDKey)
+	if !ok {
+		return "", false
+	}
+	id, ok := v.(string)
+	return id, ok
 }

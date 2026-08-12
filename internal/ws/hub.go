@@ -60,7 +60,7 @@ type Hub struct {
 }
 
 type shard struct {
-	clients    map[int64]*Client
+	clients    map[int64]map[*Client]struct{}
 	register   chan *Client
 	unregister chan *Client
 	out        chan Delivery
@@ -91,7 +91,7 @@ func NewHubWithFanout(msgRepo domain.MessageRepository, f Fanout) *Hub {
 	}
 	for i := range h.shards {
 		h.shards[i] = &shard{
-			clients:    make(map[int64]*Client),
+			clients:    make(map[int64]map[*Client]struct{}),
 			register:   make(chan *Client),
 			unregister: make(chan *Client),
 			out:        make(chan Delivery, 256),
@@ -142,18 +142,26 @@ func (h *Hub) Send(msg DirectMessage) bool {
 		return true
 	}
 
+	ok := h.route(msg.To, data)
+	if msg.From != msg.To {
+		h.route(msg.From, data)
+	}
+	return ok
+}
+
+func (h *Hub) route(userID int64, data []byte) bool {
 	if h.fanout != nil {
 		ctx, cancel := context.WithTimeout(h.context(), writeWait)
-		err := h.fanout.Publish(ctx, msg.To, data)
+		err := h.fanout.Publish(ctx, userID, data)
 		cancel()
 		if err == nil {
 			return true
 		}
 
-		logger.Errorf("hub: fanout publish to user %d: %v", msg.To, err)
+		logger.Errorf("hub: fanout publish to user %d: %v", userID, err)
 	}
 
-	return h.deliverLocal(Delivery{UserID: msg.To, Data: data})
+	return h.deliverLocal(Delivery{UserID: userID, Data: data})
 }
 
 func (h *Hub) deliverLocal(d Delivery) bool {
@@ -257,12 +265,17 @@ func (h *Hub) Run(ctx context.Context) {
 	h.baseCtx = ctx
 	close(h.baseReady)
 
+	go func() {
+		<-ctx.Done()
+		h.Stop()
+	}()
+
 	var wg sync.WaitGroup
 	for _, s := range h.shards {
 		wg.Add(1)
 		go func(s *shard) {
 			defer wg.Done()
-			s.run(ctx)
+			s.run()
 		}(s)
 	}
 
@@ -323,44 +336,54 @@ func (h *Hub) runFanout(ctx context.Context) {
 	}
 }
 
-func (s *shard) run(ctx context.Context) {
+func (s *shard) run() {
 	for {
 		select {
-		case <-ctx.Done():
-			s.shutdown()
-			return
 		case <-s.done:
 			s.shutdown()
 			return
 		case client := <-s.register:
-			if old, ok := s.clients[client.id]; ok {
-				close(old.send)
+			conns := s.clients[client.id]
+			if conns == nil {
+				conns = make(map[*Client]struct{})
+				s.clients[client.id] = conns
 			}
-			s.clients[client.id] = client
+			conns[client] = struct{}{}
 		case client := <-s.unregister:
-			if c, ok := s.clients[client.id]; ok && c == client {
-				delete(s.clients, client.id)
-				close(client.send)
-			}
+			s.drop(client)
 		case d := <-s.out:
-			client, ok := s.clients[d.UserID]
-			if !ok {
-				continue
-			}
-			select {
-			case client.send <- d.Data:
-			default:
+			for client := range s.clients[d.UserID] {
+				select {
+				case client.send <- d.Data:
+				default:
 
-				close(client.send)
-				delete(s.clients, client.id)
+					s.drop(client)
+				}
 			}
 		}
 	}
 }
 
+func (s *shard) drop(client *Client) {
+	conns, ok := s.clients[client.id]
+	if !ok {
+		return
+	}
+	if _, ok := conns[client]; !ok {
+		return
+	}
+	delete(conns, client)
+	if len(conns) == 0 {
+		delete(s.clients, client.id)
+	}
+	close(client.send)
+}
+
 func (s *shard) shutdown() {
-	for id, client := range s.clients {
-		close(client.send)
+	for id, conns := range s.clients {
+		for client := range conns {
+			close(client.send)
+		}
 		delete(s.clients, id)
 	}
 }

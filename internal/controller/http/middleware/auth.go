@@ -9,15 +9,28 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/gliedabrennung/sedna/internal/common/api"
 	"github.com/gliedabrennung/sedna/internal/common/authctx"
+	"github.com/gliedabrennung/sedna/internal/common/logger"
 	"github.com/golang-jwt/jwt/v5"
 )
 
-func JWTAuth(secret string, cookieNames ...string) app.HandlerFunc {
-	secretBytes := []byte(secret)
-	cookieName := "token"
-	if len(cookieNames) > 0 && cookieNames[0] != "" {
-		cookieName = cookieNames[0]
+type RevocationChecker interface {
+	IsRevoked(ctx context.Context, tokenID string) (bool, error)
+}
+
+type JWTConfig struct {
+	Secret     string
+	CookieName string
+
+	Revoked RevocationChecker
+}
+
+func JWTAuth(cfg JWTConfig) app.HandlerFunc {
+	secretBytes := []byte(cfg.Secret)
+	cookieName := cfg.CookieName
+	if cookieName == "" {
+		cookieName = "token"
 	}
+
 	return func(ctx context.Context, c *app.RequestContext) {
 		var tokenStr string
 
@@ -37,7 +50,7 @@ func JWTAuth(secret string, cookieNames ...string) app.HandlerFunc {
 		}
 
 		claims := &jwt.RegisteredClaims{}
-		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
+		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrTokenUnverifiable
 			}
@@ -58,7 +71,20 @@ func JWTAuth(secret string, cookieNames ...string) app.HandlerFunc {
 			return
 		}
 
+		if cfg.Revoked != nil && claims.ID != "" {
+			revoked, err := cfg.Revoked.IsRevoked(ctx, claims.ID)
+			if err != nil {
+				logger.CtxErrorf(ctx, "revocation lookup for token %s: %v", claims.ID, err)
+			} else if revoked {
+				api.ErrorResponse(c, http.StatusUnauthorized,
+					"UNAUTHORIZED", "session has been ended", nil)
+				c.Abort()
+				return
+			}
+		}
+
 		authctx.SetUserID(c, userID)
+		authctx.SetTokenID(c, claims.ID)
 		if claims.ExpiresAt != nil {
 			authctx.SetTokenExp(c, claims.ExpiresAt.Time)
 		}

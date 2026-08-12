@@ -99,9 +99,11 @@ export const WebSocketProvider: FC<{ children: ReactNode }> = ({ children }) => 
           if (!data.from || !data.message) return;
 
           const myId = useAuthStore.getState().user?.id;
-          if (data.from === myId) return;
 
-          chat.addMessage(data.from, {
+          const partnerId = data.from === myId ? data.to : data.from;
+          if (!partnerId) return;
+
+          chat.addMessage(partnerId, {
             message_id: data.message_id,
             from_id: data.from,
             to_id: data.to,
@@ -130,8 +132,7 @@ export const WebSocketProvider: FC<{ children: ReactNode }> = ({ children }) => 
         reconnectTimerRef.current = setTimeout(connect, delay);
       };
 
-      ws.onerror = () => {
-      };
+      ws.onerror = () => {};
     };
 
     connect();

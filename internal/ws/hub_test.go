@@ -52,6 +52,8 @@ func TestHub_Run_DirectMessage(t *testing.T) {
 		t.Fatal("message not delivered to client")
 	}
 
+	drain(c1)
+
 	h.Unregister(c1)
 	h.Unregister(c2)
 
@@ -65,23 +67,13 @@ func TestHub_Run_DirectMessage(t *testing.T) {
 	}
 }
 
-func TestHub_Register_ReplacesOldConnection(t *testing.T) {
-	h, cancel := testHub(t)
-	defer cancel()
-
-	c1Old := testClient(1)
-	registerClient(t, h, c1Old)
-
-	c1New := testClient(1)
-	registerClient(t, h, c1New)
-
-	select {
-	case _, ok := <-c1Old.send:
-		if ok {
-			t.Error("expected old connection channel to be closed")
+func drain(c *Client) {
+	for {
+		select {
+		case <-c.send:
+		default:
+			return
 		}
-	case <-time.After(time.Second):
-		t.Fatal("old connection channel not closed")
 	}
 }
 

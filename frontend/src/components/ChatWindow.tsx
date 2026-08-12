@@ -8,6 +8,9 @@ import { useChatMessages } from '@/hooks/useChatMessages';
 import { MessageBubble } from '@/components/MessageBubble';
 import { Avatar } from '@/components/ui/Avatar';
 import { Input } from '@/components/ui/Input';
+import { StatusDot } from '@/components/ui/StatusDot';
+
+const LOAD_MORE_THRESHOLD_PX = 80;
 
 export const ChatWindow: FC = () => {
   const user = useAuthStore((state) => state.user);
@@ -15,7 +18,7 @@ export const ChatWindow: FC = () => {
   const addMessage = useChatStore((state) => state.addMessage);
 
   const { messages, isLoading, hasMore, loadMore } = useChatMessages(activePartner?.id);
-  const { sendMessage } = useWebSocket();
+  const { sendMessage, status } = useWebSocket();
   const [text, setText] = useState('');
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,12 +45,13 @@ export const ChatWindow: FC = () => {
     const partnerChanged = prevPartnerIdRef.current !== activePartner?.id;
     const isNewMessage = messages.length > prevMessagesLenRef.current && !partnerChanged;
 
-    if (partnerChanged && messages.length > 0) {
-      setTimeout(() => {
+    if ((partnerChanged || isNewMessage) && messages.length > 0) {
+      const frame = requestAnimationFrame(() => {
         rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
-      }, 100);
-    } else if (isNewMessage) {
-      rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
+      });
+      prevPartnerIdRef.current = activePartner?.id;
+      prevMessagesLenRef.current = messages.length;
+      return () => cancelAnimationFrame(frame);
     }
 
     prevPartnerIdRef.current = activePartner?.id;
@@ -55,8 +59,10 @@ export const ChatWindow: FC = () => {
   }, [messages.length, activePartner?.id, rowVirtualizer]);
 
   const handleScroll = useCallback(() => {
-    if (containerRef.current && containerRef.current.scrollTop === 0 && hasMore && !isLoading) {
-      scrollHeightRef.current = containerRef.current.scrollHeight;
+    const el = containerRef.current;
+
+    if (el && el.scrollTop <= LOAD_MORE_THRESHOLD_PX && hasMore && !isLoading) {
+      scrollHeightRef.current = el.scrollHeight;
       loadMore();
     }
   }, [hasMore, isLoading, loadMore]);
@@ -109,7 +115,10 @@ export const ChatWindow: FC = () => {
         <Avatar username={activePartner.username} />
         <div>
           <div className="font-semibold text-[var(--color-text-primary)]">{activePartner.username}</div>
-          <div className="text-xs text-[var(--color-text-muted)]">ID: {activePartner.id}</div>
+          <div className="text-xs text-[var(--color-text-muted)] flex items-center gap-1.5">
+            <StatusDot status={status} />
+            ID: {activePartner.id}
+          </div>
         </div>
       </div>
 

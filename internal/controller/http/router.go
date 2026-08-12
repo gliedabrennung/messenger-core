@@ -11,16 +11,16 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/gliedabrennung/sedna/internal/common/api"
 	"github.com/gliedabrennung/sedna/internal/controller/http/middleware"
-	"github.com/gliedabrennung/sedna/internal/domain"
 )
 
 type Deps struct {
 	Auth      AuthService
 	Users     UserService
-	MsgRepo   domain.MessageRepository
+	Messages  MessageService
 	WsHandler app.HandlerFunc
 	JWTSecret string
 	Cookie    CookieConfig
+	Revoked   middleware.RevocationChecker
 }
 
 const distDir = "./frontend/dist"
@@ -31,7 +31,11 @@ func SetupRouter(h *server.Hertz, deps Deps) {
 	authHandler := NewAuthHandler(deps.Auth, deps.Cookie)
 	userHandler := NewUserHandler(deps.Users)
 	authLimiter := middleware.NewRateLimiter(5, 10)
-	authMiddleware := middleware.JWTAuth(deps.JWTSecret, deps.Cookie.Name)
+	authMiddleware := middleware.JWTAuth(middleware.JWTConfig{
+		Secret:     deps.JWTSecret,
+		CookieName: deps.Cookie.Name,
+		Revoked:    deps.Revoked,
+	})
 
 	h.GET("/health", func(_ context.Context, c *app.RequestContext) {
 		c.JSON(http.StatusOK, map[string]string{"status": "ok"})
@@ -41,7 +45,8 @@ func SetupRouter(h *server.Hertz, deps Deps) {
 	auth.Use(authLimiter.Handler())
 	auth.POST("/register", authHandler.Register)
 	auth.POST("/login", authHandler.Login)
-	auth.POST("/logout", authHandler.Logout)
+
+	auth.POST("/logout", authMiddleware, authHandler.Logout)
 
 	searchLimiter := middleware.NewRateLimiter(2, 10)
 
@@ -50,7 +55,7 @@ func SetupRouter(h *server.Hertz, deps Deps) {
 	users.GET("/bulk", userHandler.GetBulk)
 	users.GET("/me", userHandler.Me)
 
-	msgHandler := NewMessageHandler(deps.MsgRepo)
+	msgHandler := NewMessageHandler(deps.Messages)
 	h.GET("/messages", authMiddleware, msgHandler.GetHistory)
 
 	h.GET("/ws", authMiddleware, deps.WsHandler)
